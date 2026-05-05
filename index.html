@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>cleanKeywords — Nettoyage des mots-clefs</title>
+    <script src="assets/js/d3.min.js"></script>
+    <link rel="stylesheet" href="assets/main.css" />
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<header>
+    <h1>🧹 cleanKeywords</h1>
+    <div class="header-right">
+        <span id="creator"></span>
+        <button class="btn btn-sm btn-ghost" id="btnOpenSettings" style="color:#fff;border-color:rgba(255,255,255,.3)">⚙ Paramètres</button>
+    </div>
+</header>
+
+<!-- ── MODAL SETTINGS ── -->
+<div class="modal-overlay" id="settingsOverlay">
+    <div class="modal">
+        <h2>⚙ Configuration</h2>
+        <div id="cfgErrors" class="hidden"></div>
+        <div class="form-group">
+            <label>URL de base de l'API</label>
+            <input type="text" id="cfgApiBase" placeholder="https://…/api/" />
+        </div>
+        <div class="form-group">
+            <label>Mail</label>
+            <input type="text" id="cfgPropMail" />
+        </div>
+        <div class="form-group">
+            <label>key_identity</label>
+            <input type="text" id="cfgKeyId" />
+        </div>
+        <div class="form-group">
+            <label>key_credential</label>
+            <input type="password" id="cfgKeyCred" />
+        </div>
+        <div class="form-group">
+            <label>Propriétés mots-clefs des personnes</label>
+            <input type="text" id="cfgPersonPropExp" placeholder="skos:hasTopConcept,dcterms:subject" />
+            <div class="form-hint">Séparées par des virgules — utilisées lors de la fusion pour mettre à jour les ECs.</div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost btn-sm" id="btnCloseSettings">Annuler</button>
+            <button class="btn btn-primary" id="btnSaveSettings">Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── MODAL CONFIRMATION ── -->
+<div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-box">
+        <h3>⚠ Confirmer la fusion</h3>
+        <p id="confirmMsg"></p>
+        <div class="confirm-footer">
+            <button class="btn btn-ghost btn-sm" id="btnConfirmCancel">Annuler</button>
+            <button class="btn btn-danger" id="btnConfirmOk">Fusionner définitivement</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── STICKY FUSION (depuis Browse) ── -->
+<div class="sticky-fusion" id="stickyFusion">
+    <button class="sticky-fusion-close" id="btnStickyClose">✕</button>
+    <div class="sticky-fusion-inner">
+        <div class="ac-wrap" style="position:relative">
+            <label>Source (sera supprimé)</label>
+            <input type="text" id="stickyFusionSrc" placeholder="Rechercher un concept…" autocomplete="off" />
+            <div class="autocomplete-dropdown sticky-fusion-ac hidden" id="stickySrcDropdown"></div>
+        </div>
+        <div class="sticky-fusion-arrow">→</div>
+        <div class="ac-wrap" style="position:relative">
+            <label>Cible (sera conservé)</label>
+            <input type="text" id="stickyFusionTgt" placeholder="Rechercher un concept…" autocomplete="off" />
+            <div class="autocomplete-dropdown sticky-fusion-ac hidden" id="stickyTgtDropdown"></div>
+        </div>
+        <div>
+            <div style="height:1.2rem"></div>
+            <button class="btn btn-danger" id="btnStickyFuse">Fusionner →</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── TOASTS ── -->
+<div id="toasts"></div>
+
+<!-- ── CONTENU ── -->
+<div class="container">
+
+    <div class="tabs">
+        <div class="tab active" data-tab="detect">🔍 Doublons</div>
+        <div class="tab" data-tab="browse">📋 Tous les concepts</div>
+    </div>
+
+    <!-- ════════════ TAB : DOUBLONS ════════════ -->
+    <div id="tabDetect">
+
+        <!-- Bannière d'introduction -->
+        <div class="intro-banner" id="introBanner">
+            <h3>Comment ça marche ?</h3>
+            <div class="intro-steps">
+                <div class="intro-step">
+                    <div class="intro-step-num">1</div>
+                    <div>Cliquez sur une lettre pour analyser tous les concepts commençant par cette lettre.</div>
+                </div>
+                <div class="intro-step">
+                    <div class="intro-step-num">2</div>
+                    <div>Les paires suspectes détectées s'affichent ici. Rejetez les faux positifs, ou fusionnez les vrais doublons.</div>
+                </div>
+                <div class="intro-step">
+                    <div class="intro-step-num">3</div>
+                    <div>La fusion transfère automatiquement les ECs et Expertises vers le concept conservé, puis supprime l'autre.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Scan par lettre</div>
+
+        <!-- Bandeau cache -->
+        <div class="cache-banner hidden" id="cacheBanner">
+            <span>📦 Résultats en cache du <strong id="cacheBannerDate"></strong></span>
+            <button class="btn btn-sm btn-ghost" id="btnRefresh">🔄 Actualiser</button>
+        </div>
+
+        <div class="alpha-bar" id="alphaBar"></div>
+
+        <!-- Scan global -->
+        <div class="scan-all-bar">
+            <button class="btn btn-primary btn-sm" id="btnScanAll">⚡ Tout scanner</button>
+            <div class="scan-progress hidden" id="scanProgress">
+                <div class="scan-progress-bar">
+                    <div class="scan-progress-fill" id="scanProgressFill"></div>
+                </div>
+                <span class="scan-progress-label" id="scanProgressLabel"></span>
+            </div>
+        </div>
+        <div class="scan-status" id="scanStatus"></div>
+
+        <!-- Barre clusters -->
+        <div class="clusters-toolbar hidden" id="clustersToolbar">
+            <input type="text" id="clusterSearch" placeholder="Rechercher dans les groupes…" autocomplete="off" />
+            <select id="clusterSort" class="btn btn-ghost btn-sm" style="cursor:pointer">
+                <option value="score">↕ Score</option>
+                <option value="size">↕ Taille</option>
+                <option value="alpha">↕ A–Z</option>
+            </select>
+            <span class="progress-counter" id="progressCounter"></span>
+        </div>
+
+        <div class="loading-state hidden" id="detectLoading">
+            <div class="spinner"></div>
+            Analyse en cours…
+        </div>
+
+        <div class="pairs-list" id="pairsList"></div>
+
+        <!-- Journal (collapsible) -->
+        <div class="log-toggle hidden" id="logToggle">
+            <span id="logToggleIcon">▶</span> Journal des opérations
+        </div>
+        <div class="fusion-log hidden" id="fusionLog"></div>
+
+    </div>
+
+    <!-- ════════════ TAB : BROWSE ════════════ -->
+    <div id="tabBrowse" class="hidden">
+
+        <div class="browse-toolbar">
+            <input type="text" id="browseSearchInput" placeholder="Filtrer les concepts…" autocomplete="off" />
+            <button class="btn btn-ghost btn-sm" id="btnBrowseSort" data-sort="title">↕ Titre</button>
+        </div>
+
+        <div class="loading-state hidden" id="browseLoading">
+            <div class="spinner"></div>Chargement…
+        </div>
+
+        <div class="browse-list" id="browseList"></div>
+
+        <div class="browse-pagination hidden" id="browsePagination">
+            <button class="btn btn-ghost btn-sm" id="btnBrowsePrev">← Précédent</button>
+            <span id="browsePaginationInfo"></span>
+            <button class="btn btn-ghost btn-sm" id="btnBrowseNext">Suivant →</button>
+        </div>
+
+    </div>
+
+</div>
+
+<script type="module">
+'use strict';
+
+import { pa }                    from './assets/js/authParams.js';
+import { auth }                  from './assets/js/auth.js';
+import { findPairs, buildClusters } from './assets/js/similarity.js';
+
+
+// ──────────────────────────────────────────────
+// CONSTANTES & ÉTAT GLOBAL
+// ──────────────────────────────────────────────
+
+const STORAGE_KEY    = 'cleanKeywords_cfg';
+const REJECT_KEY     = 'cleanKeywords_rejected';
+const DONE_KEY       = 'cleanKeywords_done';
+const SCAN_CACHE_KEY = 'cleanKeywords_scan_cache';
+const DELETED_KEY    = 'cleanKeywords_deleted';
+const SCROLL_KEY     = 'cleanKeywords_scroll';
+const ALPHABET       = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+// Configuration (initialisée depuis authParams.js, puis depuis localStorage)
+let cfg = {
+    apiBase:       pa.apiOmk,
+    keyId:         pa.ident,
+    keyCred:       pa.key,
+    propMail:      pa.mail,
+    personPropExp: pa.personPropExp,
+};
+
+// Couche d'accès Omeka S (instanciée après authentification)
+let a = null;
+
+// ID de la classe skos:Concept dans Omeka S (résolu au login)
+let idClassKW = 0;
+
+// Données de scan
+let currentPairs    = [];   // toutes les paires de la dernière analyse
+let allConcepts     = [];   // tous les concepts chargés
+let currentClusters = [];   // clusters actifs (peuvent être filtrés/triés)
+
+// État de l'UI — liste des clusters
+let clusterFilter = '';     // texte de recherche dans les clusters
+let clusterSort   = 'score'; // critère de tri : 'score' | 'size' | 'alpha'
+
+// État de l'UI — browse
+let browseTimer = null;
+let browsePage  = 1;
+let browseSort  = 'title';
+let browseQuery = '';
+
+// État de l'UI — fusion en cours
+let pendingFusion   = null; // { clid, keepId, keepLabel, toMerge } OU { srcId, tgtId, srcLabel, tgtLabel }
+let stickyFusionSrc = null; // item Omeka S sélectionné comme source (sticky browse)
+let stickyFusionTgt = null; // item Omeka S sélectionné comme cible  (sticky browse)
+
+// État du journal
+let logVisible = false;
+
+// IDs des concepts supprimés durant la session (pour markStaleConcepts)
+let deletedIds = new Set(JSON.parse(localStorage.getItem(DELETED_KEY) || '[]'));
+
+// Lettres déjà scannées (pour colorier la barre alphabet)
+let doneLetters = new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]'));
+
+// Paires rejetées manuellement (pour ne pas les réafficher)
+let rejected = new Set(JSON.parse(localStorage.getItem(REJECT_KEY) || '[]'));
+
+
+// ──────────────────────────────────────────────
+// CACHE DU SCAN
+// Stocke le résultat du scan en localStorage pour
+// éviter de tout recharger à chaque session.
+// ──────────────────────────────────────────────
+
+function saveCache(clusters) {
+    const payload = {
+        scannedAt: Date.now(),
+        clusters:  clusters.map(cl => ({
+            id:        cl.id,
+            bestScore: cl.bestScore,
+            concepts:  cl.concepts.map(c => ({
+                'o:id':   c['o:id'],
+                'o:title': getLabel(c)
+            })),
+            // On stocke aId/bId pour que pairKey() fonctionne même après restauration
+            pairs: cl.pairs.map(p => ({
+                score:   p.score,
+                reason:  p.reason,
+                labelA:  p.labelA,
+                labelB:  p.labelB,
+                aId:     p.a?.['o:id'],
+                bId:     p.b?.['o:id'],
+            }))
+        }))
+    };
+    try {
+        localStorage.setItem(SCAN_CACHE_KEY, JSON.stringify(payload));
+    } catch (e) {
+        // Quota localStorage dépassé — on continue sans cache
+        console.warn('Cache non sauvegardé (quota dépassé)');
+    }
+}
+
+function loadCache() {
+    try {
+        const raw = localStorage.getItem(SCAN_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Efface tout le cache local (scan + lettres + IDs supprimés + scroll)
+function clearCache() {
+    localStorage.removeItem(SCAN_CACHE_KEY);
+    localStorage.removeItem(DONE_KEY);
+    localStorage.removeItem(DELETED_KEY);
+    localStorage.removeItem(SCROLL_KEY);
+    deletedIds  = new Set();
+    doneLetters = new Set();
+}
+
+function showCacheBanner(scannedAt) {
+    const date = new Date(scannedAt).toLocaleString('fr-FR');
+    document.getElementById('cacheBanner').classList.remove('hidden');
+    document.getElementById('cacheBannerDate').textContent = date;
+}
+
+function hideCacheBanner() {
+    document.getElementById('cacheBanner').classList.add('hidden');
+}
+
+
+// ──────────────────────────────────────────────
+// INIT
+// ──────────────────────────────────────────────
+
+(async function init() {
+    // Charge la config depuis localStorage (surcharge les valeurs par défaut)
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+        try { cfg = { ...cfg, ...JSON.parse(stored) }; } catch (e) { /* JSON malformé, on ignore */ }
+    }
+
+    buildAlphaBar();
+    openSettings();
+
+    if (cfg.keyCred) {
+        await saveSettings();
+
+        // Restaure le cache si disponible — évite un nouveau scan complet
+        const cache = loadCache();
+        if (cache && cache.clusters.length) {
+            currentClusters = cache.clusters;
+            document.getElementById('introBanner').classList.add('hidden');
+            document.getElementById('scanStatus').textContent =
+                `${cache.clusters.length} groupe${cache.clusters.length > 1 ? 's' : ''} en cache.`;
+            showCacheBanner(cache.scannedAt);
+            renderClusters(cache.clusters);
+            markStaleConcepts();
+            showClustersToolbar();
+            updateProgressCounter();
+            restoreScrollPosition();
+        }
+    }
+})();
+
+
+// ──────────────────────────────────────────────
+// SETTINGS
+// ──────────────────────────────────────────────
+
+function openSettings() {
+    document.getElementById('cfgApiBase').value       = cfg.apiBase       || '';
+    document.getElementById('cfgPropMail').value      = cfg.propMail      || '';
+    document.getElementById('cfgKeyId').value         = cfg.keyId         || '';
+    document.getElementById('cfgKeyCred').value       = cfg.keyCred       || '';
+    document.getElementById('cfgPersonPropExp').value = cfg.personPropExp || '';
+    document.querySelectorAll('#settingsOverlay .input-error')
+        .forEach(el => el.classList.remove('input-error'));
+    document.getElementById('cfgErrors').classList.add('hidden');
+    document.getElementById('settingsOverlay').classList.add('open');
+}
+
+function closeSettings() {
+    document.getElementById('settingsOverlay').classList.remove('open');
+}
+
+document.getElementById('btnOpenSettings').addEventListener('click', openSettings);
+document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
+
+// Efface l'erreur d'un champ dès que l'utilisateur le modifie
+document.querySelectorAll('#settingsOverlay input').forEach(input => {
+    input.addEventListener('input', function () {
+        this.classList.remove('input-error');
+        if (!document.querySelector('#settingsOverlay .input-error'))
+            document.getElementById('cfgErrors').classList.add('hidden');
+    });
+});
+
+document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
+
+async function saveSettings() {
+    const errEl = document.getElementById('cfgErrors');
+    errEl.classList.add('hidden');
+    errEl.innerHTML = '';
+
+    const vals = {
+        apiBase:      (document.getElementById('cfgApiBase').value || '').trim().replace(/\/$/, ''),
+        propMail:      document.getElementById('cfgPropMail').value.trim(),
+        keyId:         document.getElementById('cfgKeyId').value.trim(),
+        keyCred:       document.getElementById('cfgKeyCred').value.trim(),
+        personPropExp: document.getElementById('cfgPersonPropExp').value.trim() || pa.personPropExp,
+    };
+
+    // Validation des champs obligatoires
+    const required = [
+        { id: 'cfgApiBase', val: vals.apiBase, label: "URL de base de l'API" },
+        { id: 'cfgKeyId',   val: vals.keyId,   label: 'key_identity' },
+        { id: 'cfgKeyCred', val: vals.keyCred, label: 'key_credential' },
+    ];
+    const missing = required.filter(f => !f.val);
+    if (missing.length) {
+        missing.forEach(f => document.getElementById(f.id).classList.add('input-error'));
+        errEl.innerHTML = `<strong>Champs obligatoires manquants :</strong>
+            <ul>${missing.map(f => `<li>${f.label}</li>`).join('')}</ul>`;
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    Object.assign(cfg, vals);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+
+    // Initialise la connexion Omeka S
+    a = new auth({ mail: cfg.propMail, apiOmk: cfg.apiBase, ident: cfg.keyId, key: cfg.keyCred });
+    await a.getUser();
+
+    if (!a.user) {
+        document.getElementById('cfgKeyId').classList.add('input-error');
+        document.getElementById('cfgKeyCred').classList.add('input-error');
+        errEl.innerHTML = '<strong>Connexion échouée</strong> — vérifiez vos clés API.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    idClassKW = a.omk.getClassByTerm('skos:Concept')['o:id'];
+    d3.select('#creator').text(a.user['o:name'] || a.user['o:email'] || '');
+    closeSettings();
+    toast('Connecté', 'ok');
+    buildAlphaBar();
+}
+
+
+// ──────────────────────────────────────────────
+// LISTENERS — TABS, SCAN, CLUSTERS, NAVIGATION
+// ──────────────────────────────────────────────
+
+// Onglets
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', function () {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        this.classList.add('active');
+        document.getElementById('tabDetect').classList.toggle('hidden', this.dataset.tab !== 'detect');
+        document.getElementById('tabBrowse').classList.toggle('hidden',  this.dataset.tab !== 'browse');
+        if (this.dataset.tab === 'browse') loadBrowse();
+    });
+});
+
+// Barre de scan
+document.getElementById('btnScanAll').addEventListener('click', scanAll);
+
+document.getElementById('btnRefresh').addEventListener('click', () => {
+    clearCache();
+    hideCacheBanner();
+    currentClusters = [];
+    document.getElementById('pairsList').innerHTML    = '';
+    document.getElementById('scanStatus').textContent = '';
+    document.getElementById('clustersToolbar').classList.add('hidden');
+    document.getElementById('introBanner').classList.remove('hidden');
+    buildAlphaBar();
+    toast('Cache effacé — relancez un scan', 'ok');
+});
+
+// Barre de clusters (filtre + tri)
+document.getElementById('clusterSearch').addEventListener('input', function () {
+    clusterFilter = this.value.trim().toLowerCase();
+    applyClusterFilter();
+});
+
+document.getElementById('clusterSort').addEventListener('change', function () {
+    clusterSort = this.value;
+    sortAndRenderClusters();
+});
+
+// Confirmation de fusion
+document.getElementById('btnConfirmCancel').addEventListener('click', () => {
+    document.getElementById('confirmOverlay').classList.remove('open');
+});
+
+document.getElementById('btnConfirmOk').addEventListener('click', async () => {
+    document.getElementById('confirmOverlay').classList.remove('open');
+    if (!pendingFusion) return;
+    // La modale ne sert plus que pour le sticky Browse
+    const ok = await executeFusion(
+        pendingFusion.srcId,
+        pendingFusion.tgtId,
+        pendingFusion.srcLabel,
+        pendingFusion.tgtLabel
+    );
+    if (ok) {
+        closeStickyFusion();
+        stickyFusionSrc = null;
+        stickyFusionTgt = null;
+        document.getElementById('stickyFusionSrc').value = '';
+        document.getElementById('stickyFusionTgt').value = '';
+    }
+    pendingFusion = null;
+});
+
+// Mémorisation de la position de scroll (onglet Doublons uniquement)
+window.addEventListener('scroll', () => {
+    if (!document.getElementById('tabDetect').classList.contains('hidden'))
+        localStorage.setItem(SCROLL_KEY, window.scrollY);
+});
+
+
+// ──────────────────────────────────────────────
+// UTILITAIRES CLUSTERS — FILTRE, TRI, COMPTEUR, SCROLL
+// ──────────────────────────────────────────────
+
+function showClustersToolbar() {
+    document.getElementById('clustersToolbar').classList.remove('hidden');
+}
+
+// Affiche/masque les cartes selon le filtre texte
+function applyClusterFilter() {
+    document.querySelectorAll('.pair-card[data-clid]').forEach(card => {
+        if (!clusterFilter) { card.style.display = ''; return; }
+        card.style.display = card.textContent.toLowerCase().includes(clusterFilter) ? '' : 'none';
+    });
+}
+
+// Trie currentClusters et re-rend
+function sortAndRenderClusters() {
+    const sorted = [...currentClusters];
+    if (clusterSort === 'score') sorted.sort((a, b) => b.bestScore - a.bestScore);
+    if (clusterSort === 'size')  sorted.sort((a, b) => b.concepts.length - a.concepts.length);
+    if (clusterSort === 'alpha') sorted.sort((a, b) =>
+        (a.concepts[0] ? getLabel(a.concepts[0]) : '').localeCompare(
+         b.concepts[0] ? getLabel(b.concepts[0]) : '', 'fr')
+    );
+    renderClusters(sorted);
+    markStaleConcepts();
+    applyClusterFilter();
+    updateProgressCounter();
+}
+
+// Compteur "X / total traités" dans la barre clusters
+function updateProgressCounter() {
+    const total   = currentClusters.length;
+    const pending = document.querySelectorAll('.pair-card[data-clid]').length;
+    const done    = total - pending;
+    document.getElementById('progressCounter').textContent =
+        `${done} / ${total} traité${done !== 1 ? 's' : ''}`;
+}
+
+function restoreScrollPosition() {
+    const y = parseInt(localStorage.getItem(SCROLL_KEY) || '0');
+    if (y > 0) setTimeout(() => window.scrollTo({ top: y, behavior: 'instant' }), 80);
+}
+
+
+// ──────────────────────────────────────────────
+// ALPHABET + SCAN
+// ──────────────────────────────────────────────
+
+function buildAlphaBar() {
+    const bar = document.getElementById('alphaBar');
+    bar.innerHTML = '';
+    ALPHABET.forEach(letter => {
+        const btn = document.createElement('button');
+        btn.className   = 'alpha-btn' + (doneLetters.has(letter) ? ' done' : '');
+        btn.textContent = letter;
+        btn.addEventListener('click', () => scanLetter(letter));
+        bar.appendChild(btn);
+    });
+}
+
+// Clé unique pour une paire — compatible avec les paires fraîches (p.a/p.b)
+// et les paires restaurées depuis le cache (p.aId/p.bId)
+function pairKey(p) {
+    const idA = p.a?.['o:id'] ?? p.aId;
+    const idB = p.b?.['o:id'] ?? p.bId;
+    return `${idA}_${idB}`;
+}
+
+// Scan global : parcourt toutes les lettres en séquence
+async function scanAll() {
+    if (!a) { toast("Configurez d'abord l'API", 'err'); openSettings(); return; }
+
+    document.getElementById('introBanner').classList.add('hidden');
+    document.getElementById('btnScanAll').disabled = true;
+    document.getElementById('scanProgress').classList.remove('hidden');
+    document.getElementById('detectLoading').classList.remove('hidden');
+    document.getElementById('pairsList').innerHTML = '';
+
+    const fill  = document.getElementById('scanProgressFill');
+    const label = document.getElementById('scanProgressLabel');
+    let allConceptsG = [];
+
+    for (let i = 0; i < ALPHABET.length; i++) {
+        const letter = ALPHABET[i];
+        fill.style.width  = Math.round(((i + 1) / ALPHABET.length) * 100) + '%';
+        label.textContent = `${letter} — ${i + 1} / ${ALPHABET.length}`;
+        // Yield pour laisser le navigateur mettre à jour l'UI entre chaque lettre
+        await new Promise(r => setTimeout(r, 0));
+        const concepts = await scanLetter(letter, true);
+        allConceptsG   = allConceptsG.concat(concepts);
+    }
+
+    const allPairs  = findPairs(allConceptsG).filter(p => !rejected.has(pairKey(p)));
+    currentPairs    = allPairs;
+    allConcepts     = allConceptsG;
+    const clusters  = buildClusters(allPairs, allConceptsG);
+    currentClusters = clusters;
+
+    document.getElementById('detectLoading').classList.add('hidden');
+    document.getElementById('scanProgress').classList.add('hidden');
+    document.getElementById('btnScanAll').disabled = false;
+    document.getElementById('scanStatus').textContent =
+        `Scan complet — ${allConceptsG.length} concepts analysés → ` +
+        `${clusters.length} groupe${clusters.length !== 1 ? 's' : ''} de doublons détecté${clusters.length !== 1 ? 's' : ''}.`;
+
+    renderClusters(clusters);
+    saveCache(clusters);
+    showClustersToolbar();
+    updateProgressCounter();
+    buildAlphaBar();
+}
+
+// Scan d'une lettre (mode interactif ou silencieux pour scanAll)
+async function scanLetter(letter, silent = false) {
+    if (!a) { toast("Configurez d'abord l'API", 'err'); openSettings(); return []; }
+
+    if (!silent) {
+        document.getElementById('introBanner').classList.add('hidden');
+        document.querySelectorAll('.alpha-btn').forEach(b => b.classList.remove('active'));
+        const btn = [...document.querySelectorAll('.alpha-btn')].find(b => b.textContent === letter);
+        if (btn) btn.classList.add('active');
+        document.getElementById('scanStatus').textContent = `Analyse de la lettre ${letter}…`;
+        document.getElementById('detectLoading').classList.remove('hidden');
+        document.getElementById('pairsList').innerHTML = '';
+    }
+
+    let concepts = [];
+    try {
+        const propTitleId = a.omk.getPropId('dcterms:title');
+        const result = a.omk.searchItems(
+            `resource_class_id[]=${idClassKW}` +
+            `&property[0][property]=${propTitleId}` +
+            `&property[0][type]=sw` +
+            `&property[0][text]=${encodeURIComponent(letter)}` +
+            `&per_page=500&sort_by=title&sort_order=asc`
+        );
+        concepts = Array.isArray(result) ? result : [];
+    } catch (e) {
+        if (!silent) toast('Erreur lors du chargement', 'err', e.message);
+    }
+
+    doneLetters.add(letter);
+    localStorage.setItem(DONE_KEY, JSON.stringify([...doneLetters]));
+
+    if (!silent) {
+        const pairs    = findPairs(concepts).filter(p => !rejected.has(pairKey(p)));
+        const clusters = buildClusters(pairs, concepts);
+        currentPairs    = pairs;
+        allConcepts     = concepts;
+        currentClusters = clusters;
+        document.getElementById('detectLoading').classList.add('hidden');
+        document.getElementById('scanStatus').textContent =
+            `Lettre ${letter} — ${concepts.length} concept${concepts.length !== 1 ? 's' : ''} analysé${concepts.length !== 1 ? 's' : ''}` +
+            (clusters.length
+                ? ` → ${clusters.length} groupe${clusters.length !== 1 ? 's' : ''} de doublons détecté${clusters.length !== 1 ? 's' : ''}.`
+                : ` → aucun doublon détecté ✅`);
+        renderClusters(clusters);
+        saveCache(clusters);
+        showClustersToolbar();
+        updateProgressCounter();
+        buildAlphaBar();
+        // Marque la lettre comme traitée
+        const btn = [...document.querySelectorAll('.alpha-btn')].find(b => b.textContent === letter);
+        if (btn) { btn.classList.remove('active'); btn.classList.add('done'); }
+    }
+
+    return concepts;
+}
+
+
+// ──────────────────────────────────────────────
+// RENDU DES CLUSTERS
+// ──────────────────────────────────────────────
+
+// Génère le HTML d'un concept dans la liste d'un cluster
+function conceptItemHTML(c, clid, i) {
+    const label = getLabel(c);
+    return `<label class="cluster-concept">
+        <input type="radio" name="keep-${clid}" value="${c['o:id']}" data-label="${esc(label)}" ${i === 0 ? 'checked' : ''} />
+        <span class="cluster-concept-label">${esc(label)}</span>
+        <span class="ac-id">#${c['o:id']}</span>
+        <button class="btn-remove-concept"
+            data-action="remove-concept"
+            data-clid="${clid}"
+            data-cid="${c['o:id']}"
+            title="Exclure du groupe">✕</button>
+    </label>`;
+}
+
+function renderClusters(clusters) {
+    const list = document.getElementById('pairsList');
+    if (!clusters.length) {
+        list.innerHTML = `<p class="pairs-empty">✅ Aucun doublon détecté.</p>`;
+        return;
+    }
+    list.innerHTML = clusters.map(cl => {
+        const scoreDisp   = Math.round(cl.bestScore * 100) + '%';
+        const conceptsHTML = cl.concepts.map((c, i) => conceptItemHTML(c, cl.id, i)).join('');
+        const reasons      = [...new Set(cl.pairs.map(p => p.reason))].join(' · ');
+        const scoreAttr    = cl.bestScore >= 0.9 ? 'data-score-high' : cl.bestScore >= 0.75 ? 'data-score-medium' : '';
+        return `<div class="pair-card" data-clid="${cl.id}" ${scoreAttr}>
+            <div class="pair-main">
+                <div class="pair-info">
+                    <div class="cluster-header">
+                        <span class="cluster-count">${cl.concepts.length} concepts similaires</span>
+                        <span class="pair-score">${scoreDisp}</span>
+                        <span class="pair-reason">${esc(reasons)}</span>
+                    </div>
+                    <div class="cluster-concepts" id="cc-${cl.id}">${conceptsHTML}</div>
+                    <div class="cluster-hint">
+                        Sélectionnez le concept à <strong>conserver</strong> — les autres seront fusionnés dedans.
+                    </div>
+                </div>
+                <div class="pair-actions">
+                    <button class="btn btn-sm btn-ghost"   data-action="reject-cl"  data-clid="${cl.id}">Rejeter</button>
+                    <button class="btn btn-sm btn-ghost"   data-action="fuse-cl"    data-clid="${cl.id}">Détails ↓</button>
+                    <button class="btn btn-sm btn-danger"  data-action="fuse-quick" data-clid="${cl.id}">Fusionner →</button>
+                </div>
+            </div>
+            <!-- Accordéon : aperçu chargé automatiquement à l'ouverture -->
+            <div class="pair-fusion-panel" id="fp-${cl.id}">
+                <div class="pair-fusion-preview" id="fpv-${cl.id}">
+                    <span class="pair-fusion-status">Chargement…</span>
+                </div>
+                <div class="pair-fusion-actions">
+                    <button class="btn btn-sm btn-danger" data-action="confirm-cl" data-clid="${cl.id}" disabled>
+                        Fusionner →
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Listeners
+    list.querySelectorAll('[data-action="remove-concept"]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            removeConceptFromCluster(btn.dataset.clid, parseInt(btn.dataset.cid));
+        });
+    });
+    list.querySelectorAll('[data-action="reject-cl"]') .forEach(btn => btn.addEventListener('click', () => rejectCluster(btn.dataset.clid)));
+    // "Détails ↓" : ouvre l'accordéon ET lance l'aperçu automatiquement
+    list.querySelectorAll('[data-action="fuse-cl"]')   .forEach(btn => btn.addEventListener('click', () => {
+        toggleFusionPanel(btn.dataset.clid);
+        previewCluster(btn.dataset.clid);
+    }));
+    // "Fusionner →" rapide : exécute directement sans accordéon ni modale
+    list.querySelectorAll('[data-action="fuse-quick"]').forEach(btn => btn.addEventListener('click', () => quickFuseCluster(btn.dataset.clid)));
+    list.querySelectorAll('[data-action="confirm-cl"]').forEach(btn => btn.addEventListener('click', () => directFuseCluster(btn.dataset.clid)));
+}
+
+
+// ──────────────────────────────────────────────
+// ACTIONS SUR LES CLUSTERS
+// ──────────────────────────────────────────────
+
+// Exclut un concept d'un cluster sans toucher à la BDD
+function removeConceptFromCluster(clid, conceptId) {
+    const cl = currentClusters.find(c => c.id === clid);
+    if (!cl) return;
+
+    cl.concepts = cl.concepts.filter(c => c['o:id'] !== conceptId);
+    cl.pairs    = cl.pairs.filter(p =>
+        p.a?.['o:id'] !== conceptId && p.b?.['o:id'] !== conceptId &&
+        p.aId !== conceptId && p.bId !== conceptId
+    );
+
+    if (cl.concepts.length < 2) {
+        // Plus assez de concepts — retire la carte
+        const card = document.querySelector(`.pair-card[data-clid="${clid}"]`);
+        if (card) { card.classList.add('rejecting'); setTimeout(() => card.remove(), 320); }
+        currentClusters = currentClusters.filter(c => c.id !== clid);
+        toast('Groupe retiré (plus assez de concepts)', 'ok');
+    } else {
+        // Met à jour le bestScore et re-rend la liste de concepts
+        cl.bestScore = cl.pairs.length ? Math.max(...cl.pairs.map(p => p.score)) : cl.bestScore;
+        const cc = document.getElementById('cc-' + clid);
+        if (cc) {
+            cc.innerHTML = cl.concepts.map((c, i) => conceptItemHTML(c, clid, i)).join('');
+            cc.querySelectorAll('[data-action="remove-concept"]').forEach(btn => {
+                btn.addEventListener('click', e => {
+                    e.preventDefault();
+                    removeConceptFromCluster(btn.dataset.clid, parseInt(btn.dataset.cid));
+                });
+            });
+        }
+        // Reset l'aperçu (les données ont changé)
+        const fpv = document.getElementById('fpv-' + clid);
+        if (fpv) fpv.innerHTML = `<span class="pair-fusion-status">Concept exclu — rouvrez "Détails ↓" pour recalculer.</span>`;
+        const confirmBtn = document.querySelector(`[data-action="confirm-cl"][data-clid="${clid}"]`);
+        if (confirmBtn) confirmBtn.disabled = true;
+        pendingFusion = null;
+    }
+    saveCache(currentClusters);
+}
+
+// Ouvre/ferme le panneau accordéon de fusion d'un cluster
+function toggleFusionPanel(clid) {
+    const panel  = document.getElementById('fp-' + clid);
+    if (!panel) return;
+    const isOpen = panel.classList.contains('open');
+    // Ferme tous les autres panneaux avant d'ouvrir celui-ci
+    document.querySelectorAll('.pair-fusion-panel.open').forEach(p => p.classList.remove('open'));
+    if (!isOpen) panel.classList.add('open');
+}
+
+// Rejette un cluster : mémorise les paires pour ne plus les afficher
+function rejectCluster(clid) {
+    const cl = currentClusters.find(c => c.id === clid);
+    if (cl) cl.pairs.forEach(p => rejected.add(pairKey(p)));
+    localStorage.setItem(REJECT_KEY, JSON.stringify([...rejected]));
+    const card = document.querySelector(`.pair-card[data-clid="${clid}"]`);
+    if (card) { card.classList.add('rejecting'); setTimeout(() => { card.remove(); updateProgressCounter(); }, 320); }
+    toast('Groupe rejeté', 'ok');
+}
+
+// Retourne le concept sélectionné comme "à conserver" dans un cluster
+function getSelectedKeep(clid) {
+    const radio = document.querySelector(`input[name="keep-${clid}"]:checked`);
+    return radio ? { id: parseInt(radio.value), label: radio.dataset.label } : null;
+}
+
+// Calcule l'impact de la fusion (nb ECs + Expertises affectés) et affiche l'aperçu
+async function previewCluster(clid) {
+    if (!a) return;
+    const cl   = currentClusters.find(c => c.id === clid);
+    if (!cl) return;
+    const keep = getSelectedKeep(clid);
+    if (!keep) return;
+
+    const preview  = document.getElementById('fpv-' + clid);
+    preview.innerHTML = `<span class="pair-fusion-status">Calcul en cours…</span>`;
+
+    const toMerge  = cl.concepts.filter(c => c['o:id'] !== keep.id);
+    const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+    let totalEc = 0, totalExp = 0;
+
+    try {
+        for (const src of toMerge) {
+            // Compte les ECs liés à ce concept source
+            for (const prop of propList) {
+                const propId  = a.omk.getPropId(prop);
+                const results = a.omk.searchItems(
+                    `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${src['o:id']}&per_page=1000`
+                );
+                totalEc += Array.isArray(results) ? results.length : 0;
+            }
+            // Compte les Expertises liées à ce concept source
+            const expPropId  = a.omk.getPropId('valo:expertise');
+            const expertises = a.omk.searchItems(
+                `property[0][property]=${expPropId}&property[0][type]=res&property[0][text]=${src['o:id']}&per_page=1000`
+            );
+            totalExp += Array.isArray(expertises) ? expertises.length : 0;
+        }
+
+        preview.innerHTML = `
+            Conserver <strong style="color:var(--success)">${esc(keep.label)}</strong> —
+            fusionner <strong>${toMerge.length}</strong> autre${toMerge.length !== 1 ? 's' : ''} concept${toMerge.length !== 1 ? 's' : ''} dedans.<br>
+            <span style="font-size:.78rem;color:var(--muted)">
+                <strong>${totalEc}</strong> EC${totalEc !== 1 ? 's' : ''} à mettre à jour &nbsp;·&nbsp;
+                <strong>${totalExp}</strong> Expertise${totalExp !== 1 ? 's' : ''} à transférer &nbsp;·&nbsp;
+                <strong style="color:var(--danger)">${toMerge.length} concept${toMerge.length !== 1 ? 's' : ''} seront supprimés.</strong>
+            </span>`;
+
+        const confirmBtn = document.querySelector(`[data-action="confirm-cl"][data-clid="${clid}"]`);
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+        }
+        pendingFusion = { clid, keepId: keep.id, keepLabel: keep.label, toMerge, totalEc, totalExp };
+
+    } catch (e) {
+        toast('Erreur lors de l\'aperçu', 'err', e.message);
+    }
+}
+
+// Fusion rapide (bouton "Fusionner →" sur la carte) :
+// utilise le concept sélectionné par défaut (1er radio coché), sans aperçu ni modale
+async function quickFuseCluster(clid) {
+    const cl   = currentClusters.find(c => c.id === clid);
+    if (!cl) return;
+    const keep = getSelectedKeep(clid);
+    if (!keep) { toast('Aucun concept sélectionné', 'err'); return; }
+    const toMerge = cl.concepts.filter(c => c['o:id'] !== keep.id);
+    await executeClusterFusion(clid, keep.id, keep.label, toMerge);
+}
+
+// Fusion depuis l'accordéon (bouton "Fusionner →" dans les détails) :
+// utilise le concept sélectionné au moment du clic, sans modale
+async function directFuseCluster(clid) {
+    if (!pendingFusion || pendingFusion.clid !== clid) {
+        // Aperçu pas encore chargé — on recalcule et on fusionne
+        await previewCluster(clid);
+        if (!pendingFusion || pendingFusion.clid !== clid) return;
+    }
+    await executeClusterFusion(
+        pendingFusion.clid,
+        pendingFusion.keepId,
+        pendingFusion.keepLabel,
+        pendingFusion.toMerge
+    );
+}
+
+// Exécute la fusion de tous les concepts non-conservés d'un cluster
+async function executeClusterFusion(clid, keepId, keepLabel, toMerge) {
+    let allOk = true;
+    for (const src of toMerge) {
+        const ok = await executeFusion(src['o:id'], keepId, getLabel(src), keepLabel);
+        if (!ok) allOk = false;
+    }
+    if (allOk) {
+        const card = document.querySelector(`.pair-card[data-clid="${clid}"]`);
+        if (card) { card.classList.add('fused'); setTimeout(() => { card.remove(); updateProgressCounter(); }, 320); }
+        toast(`Groupe fusionné dans « ${keepLabel} » ✓`, 'ok');
+    } else {
+        toast('Fusion partielle — vérifiez le journal', 'err');
+        markStaleConcepts();
+    }
+    pendingFusion = null;
+}
+
+
+// ──────────────────────────────────────────────
+// EXÉCUTION DE LA FUSION (opération BDD)
+// Retourne true si succès complet, false si erreur.
+// En cas d'erreur sur les transferts, la source N'EST PAS supprimée.
+// ──────────────────────────────────────────────
+
+async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
+    // 0. Vérifie que le concept source existe toujours en BDD
+    try {
+        const srcCheck = a.omk.getItem(srcId);
+        if (!srcCheck || srcCheck['o:id'] !== srcId) {
+            toast(`« ${srcLabel} » introuvable en BDD — fusion annulée`, 'err');
+            logFusion(`✗ « ${srcLabel} » (#${srcId}) introuvable — déjà supprimé ?`, 'err');
+            deletedIds.add(srcId);
+            localStorage.setItem(DELETED_KEY, JSON.stringify([...deletedIds]));
+            markStaleConcepts();
+            return false;
+        }
+    } catch (e) {
+        toast(`Impossible de vérifier « ${srcLabel} » — fusion annulée`, 'err', e.message);
+        return false;
+    }
+
+    showLog();
+    logFusion(`Fusion : « ${srcLabel} » → « ${tgtLabel} »`);
+    let errors = 0;
+
+    // 1. Mettre à jour les ECs (remplace srcId par tgtId dans chaque propriété)
+    const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+    for (const prop of propList) {
+        try {
+            const propId = a.omk.getPropId(prop);
+            const ecs    = a.omk.searchItems(
+                `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${srcId}&per_page=1000`
+            );
+            for (const ec of (Array.isArray(ecs) ? ecs : [])) {
+                try {
+                    const updated = (ec[prop] || []).map(v =>
+                        v.value_resource_id == srcId ? { ...v, value_resource_id: tgtId } : v
+                    );
+                    const dataOri = { ...ec, [prop]: updated };
+                    await a.omk.updateRessource(ec['o:id'], null, 'items', dataOri, 'PUT', dataOri);
+                    logFusion(`  ✓ EC #${ec['o:id']} mis à jour (${prop})`, 'ok');
+                } catch (e) {
+                    logFusion(`  ✗ EC #${ec['o:id']} — ${e.message}`, 'err');
+                    errors++;
+                }
+            }
+        } catch (e) {
+            logFusion(`  ✗ Erreur lecture ECs (${prop}) — ${e.message}`, 'err');
+            errors++;
+        }
+    }
+
+    // 2. Transférer les Expertises (pointe valo:expertise vers tgtId)
+    try {
+        const expertisePropId = a.omk.getPropId('valo:expertise');
+        const expertises = a.omk.searchItems(
+            `property[0][property]=${expertisePropId}&property[0][type]=res&property[0][text]=${srcId}&per_page=1000`
+        );
+        for (const exp of (Array.isArray(expertises) ? expertises : [])) {
+            try {
+                await a.omk.updateRessource(exp['o:id'], { 'valo:expertise': { rid: tgtId } });
+                logFusion(`  ✓ Expertise #${exp['o:id']} transférée`, 'ok');
+            } catch (e) {
+                logFusion(`  ✗ Expertise #${exp['o:id']} — ${e.message}`, 'err');
+                errors++;
+            }
+        }
+    } catch (e) {
+        logFusion(`  ✗ Erreur lecture Expertises — ${e.message}`, 'err');
+        errors++;
+    }
+
+    // Abort : si des erreurs sont survenues, on ne supprime PAS la source
+    // (la BDD reste dans un état cohérent, partiellement mis à jour)
+    if (errors > 0) {
+        logFusion(`────── Fusion interrompue (${errors} erreur(s)) — source non supprimée`, 'err');
+        toast(`Fusion interrompue — ${errors} erreur(s), source conservée`, 'err');
+        return false;
+    }
+
+    // 3. Ajouter dcterms:replaces sur la cible (traçabilité — non bloquant)
+    try {
+        await a.omk.updateRessource(tgtId, { 'dcterms:replaces': { rid: srcId } });
+        logFusion(`  ✓ dcterms:replaces ajouté sur #${tgtId}`, 'ok');
+    } catch (e) {
+        logFusion(`  ✗ dcterms:replaces — ${e.message}`, 'err');
+        // On continue quand même (non bloquant)
+    }
+
+    // 4. Supprimer la source (seulement si tous les transferts ont réussi)
+    try {
+        await a.omk.deleteItem({ 'o:id': srcId });
+        logFusion(`  ✓ #${srcId} supprimé`, 'ok');
+        deletedIds.add(srcId);
+        localStorage.setItem(DELETED_KEY, JSON.stringify([...deletedIds]));
+        markStaleConcepts();
+    } catch (e) {
+        logFusion(`  ✗ Suppression échouée — ${e.message}`, 'err');
+        toast(`Transferts OK mais suppression échouée pour « ${srcLabel} »`, 'err', e.message);
+        return false;
+    }
+
+    logFusion(`────── Terminé sans erreur ✓`, 'ok');
+    toast(`Fusion « ${srcLabel} » → « ${tgtLabel} » terminée ✓`, 'ok');
+    return true;
+}
+
+
+// ──────────────────────────────────────────────
+// DÉTECTION D'OBSOLESCENCE POST-FUSION
+// Barre les concepts supprimés dans les clusters encore affichés.
+// Si un cluster n'a plus qu'un seul concept actif, il est marqué "À réviser".
+// ──────────────────────────────────────────────
+
+function markStaleConcepts() {
+    document.querySelectorAll('.pair-card[data-clid]').forEach(card => {
+        const clid = card.dataset.clid;
+        const cc   = document.getElementById('cc-' + clid);
+        if (!cc) return;
+
+        let activeCount = 0;
+
+        cc.querySelectorAll('.cluster-concept').forEach(row => {
+            const radio = row.querySelector('input[type="radio"]');
+            if (!radio) return;
+            const cid = parseInt(radio.value);
+            if (deletedIds.has(cid)) {
+                // Concept supprimé — barre la ligne et désactive le radio
+                row.classList.add('concept-stale');
+                radio.disabled = true;
+                if (radio.checked) radio.checked = false;
+            } else {
+                activeCount++;
+                // S'assure qu'un radio reste coché
+                if (!cc.querySelector('input[type="radio"]:not(:disabled):checked'))
+                    radio.checked = true;
+            }
+        });
+
+        // Cluster dégradé : 0 ou 1 concept actif
+        if (activeCount <= 1) {
+            card.classList.add('cluster-obsolete');
+            const header = card.querySelector('.cluster-header');
+            if (header && !header.querySelector('.stale-badge'))
+                header.insertAdjacentHTML('beforeend', '<span class="stale-badge">⚠ À réviser</span>');
+            card.querySelectorAll('[data-action="fuse-cl"], [data-action="preview-cl"], [data-action="confirm-cl"]')
+                .forEach(b => b.disabled = true);
+        }
+    });
+}
+
+
+// ──────────────────────────────────────────────
+// JOURNAL DES OPÉRATIONS
+// ──────────────────────────────────────────────
+
+function showLog() {
+    document.getElementById('logToggle').classList.remove('hidden');
+    document.getElementById('fusionLog').classList.remove('hidden');
+    logVisible = true;
+}
+
+document.getElementById('logToggle').addEventListener('click', () => {
+    logVisible = !logVisible;
+    document.getElementById('fusionLog').classList.toggle('hidden', !logVisible);
+    document.getElementById('logToggleIcon').textContent = logVisible ? '▼' : '▶';
+});
+
+function logFusion(msg, type = '') {
+    const log   = document.getElementById('fusionLog');
+    const entry = document.createElement('div');
+    entry.className   = `log-entry ${type}`;
+    entry.textContent = msg;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+
+// ──────────────────────────────────────────────
+// BROWSE — TOUS LES CONCEPTS
+// ──────────────────────────────────────────────
+
+document.getElementById('browseSearchInput').addEventListener('input', function () {
+    clearTimeout(browseTimer);
+    browseQuery = this.value.trim();
+    browsePage  = 1;
+    browseTimer = setTimeout(loadBrowse, 320);
+});
+
+document.getElementById('btnBrowseSort').addEventListener('click', function () {
+    browseSort       = browseSort === 'title' ? 'created' : 'title';
+    this.textContent = browseSort === 'title' ? '↕ Titre' : '↕ Date';
+    browsePage       = 1;
+    loadBrowse();
+});
+
+document.getElementById('btnBrowsePrev').addEventListener('click', () => {
+    if (browsePage > 1) { browsePage--; loadBrowse(); }
+});
+document.getElementById('btnBrowseNext').addEventListener('click', () => {
+    if (!document.getElementById('btnBrowseNext').disabled) { browsePage++; loadBrowse(); }
+});
+
+function loadBrowse() {
+    if (!a) return;
+    document.getElementById('browseLoading').classList.remove('hidden');
+    document.getElementById('browseList').innerHTML = '';
+    document.getElementById('browsePagination').classList.add('hidden');
+    try {
+        const propTitleId = a.omk.getPropId('dcterms:title');
+        let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
+        if (browseQuery)
+            query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
+        const { items, hasMore } = a.omk.searchItemsPaginated(query, browsePage, 30);
+        document.getElementById('browseLoading').classList.add('hidden');
+        renderBrowseList(items, hasMore);
+    } catch (e) {
+        document.getElementById('browseLoading').classList.add('hidden');
+        toast('Erreur lors du chargement', 'err', e.message);
+    }
+}
+
+function renderBrowseList(items, hasMore) {
+    const list = document.getElementById('browseList');
+
+    // Construit un index concept → nb de clusters pour les badges
+    const clusterCountById = {};
+    currentClusters.forEach(cl => {
+        cl.concepts.forEach(c => {
+            clusterCountById[c['o:id']] = (clusterCountById[c['o:id']] || 0) + 1;
+        });
+    });
+
+    if (!items.length) {
+        list.innerHTML = `<p style="color:var(--muted);font-style:italic;text-align:center;padding:2rem 0">Aucun concept trouvé.</p>`;
+        document.getElementById('browsePagination').classList.add('hidden');
+        return;
+    }
+
+    list.innerHTML = items.map(item => {
+        const label    = getLabel(item);
+        const id       = item['o:id'];
+        const clCount  = clusterCountById[id] || 0;
+        const clBadge  = clCount > 0
+            ? `<button class="browse-cl-badge" data-action="goto-cluster" data-id="${id}"
+                title="Voir le groupe de doublons">⚠ ${clCount} groupe${clCount > 1 ? 's' : ''}</button>`
+            : '';
+        return `<div class="browse-item">
+            <div class="browse-item-name">${esc(label)}</div>
+            <div class="browse-item-meta">
+                <span class="browse-id">#${id}</span>
+                ${clBadge}
+                <button class="btn btn-sm btn-ghost" data-action="src" data-id="${id}" data-label="${esc(label)}">→ Source</button>
+                <button class="btn btn-sm btn-ghost" data-action="tgt" data-id="${id}" data-label="${esc(label)}">→ Cible</button>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Listeners
+    list.querySelectorAll('[data-action="goto-cluster"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const conceptId = parseInt(btn.dataset.id);
+            // Bascule sur l'onglet Doublons
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.tab[data-tab="detect"]').classList.add('active');
+            document.getElementById('tabDetect').classList.remove('hidden');
+            document.getElementById('tabBrowse').classList.add('hidden');
+            // Scrolle vers le cluster concerné et le surligne brièvement
+            const cl = currentClusters.find(c => c.concepts.some(concept => concept['o:id'] === conceptId));
+            if (cl) {
+                const card = document.querySelector(`.pair-card[data-clid="${cl.id}"]`);
+                if (card) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    card.style.outline = '2px solid var(--accent)';
+                    setTimeout(() => card.style.outline = '', 1800);
+                }
+            }
+        });
+    });
+
+    list.querySelectorAll('[data-action="src"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            stickyFusionSrc = items.find(i => i['o:id'] == btn.dataset.id);
+            document.getElementById('stickyFusionSrc').value = btn.dataset.label;
+            openStickyFusion();
+            toast(`Source définie : « ${btn.dataset.label} »`, 'ok');
+        });
+    });
+
+    list.querySelectorAll('[data-action="tgt"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            stickyFusionTgt = items.find(i => i['o:id'] == btn.dataset.id);
+            document.getElementById('stickyFusionTgt').value = btn.dataset.label;
+            openStickyFusion();
+            toast(`Cible définie : « ${btn.dataset.label} »`, 'ok');
+        });
+    });
+
+    const pag = document.getElementById('browsePagination');
+    pag.classList.remove('hidden');
+    document.getElementById('browsePaginationInfo').textContent = `Page ${browsePage}`;
+    document.getElementById('btnBrowsePrev').disabled = browsePage <= 1;
+    document.getElementById('btnBrowseNext').disabled = !hasMore;
+}
+
+
+// ──────────────────────────────────────────────
+// STICKY FUSION (formulaire de fusion manuelle depuis Browse)
+// ──────────────────────────────────────────────
+
+function openStickyFusion()  { document.getElementById('stickyFusion').classList.add('open'); }
+function closeStickyFusion() { document.getElementById('stickyFusion').classList.remove('open'); }
+
+document.getElementById('btnStickyClose').addEventListener('click', closeStickyFusion);
+
+// Autocompletes des deux champs du sticky
+setupStickyAc('stickyFusionSrc', 'stickySrcDropdown', item => { stickyFusionSrc = item; });
+setupStickyAc('stickyFusionTgt', 'stickyTgtDropdown', item => { stickyFusionTgt = item; });
+
+function setupStickyAc(inputId, dropdownId, onSelect) {
+    let timer = null;
+    const input    = document.getElementById(inputId);
+    const dropdown = document.getElementById(dropdownId);
+    input.addEventListener('input', function () {
+        clearTimeout(timer);
+        const q = this.value.trim();
+        if (!q) { dropdown.classList.add('hidden'); return; }
+        timer = setTimeout(() => {
+            if (!a) return;
+            try {
+                const propTitleId = a.omk.getPropId('dcterms:title');
+                const items = a.omk.searchItems(
+                    `resource_class_id[]=${idClassKW}&property[0][property]=${propTitleId}` +
+                    `&property[0][type]=in&property[0][text]=${encodeURIComponent(q)}&per_page=12`
+                );
+                if (!items.length) { dropdown.classList.add('hidden'); return; }
+                dropdown.innerHTML = items.map(item => {
+                    const label = getLabel(item);
+                    return `<div class="autocomplete-item" data-id="${item['o:id']}" data-label="${esc(label)}">
+                        <span>${esc(label)}</span><span class="ac-id">#${item['o:id']}</span>
+                    </div>`;
+                }).join('');
+                dropdown.querySelectorAll('.autocomplete-item').forEach(el => {
+                    el.addEventListener('mousedown', () => {
+                        const selected = items.find(i => i['o:id'] == el.dataset.id);
+                        input.value = el.dataset.label;
+                        dropdown.classList.add('hidden');
+                        if (selected) onSelect(selected);
+                    });
+                });
+                dropdown.classList.remove('hidden');
+            } catch (e) { /* ignore les erreurs d'autocomplete */ }
+        }, 280);
+    });
+    input.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
+}
+
+document.getElementById('btnStickyFuse').addEventListener('click', () => {
+    if (!stickyFusionSrc || !stickyFusionTgt) {
+        toast('Sélectionnez les deux concepts', 'err');
+        return;
+    }
+    if (stickyFusionSrc['o:id'] === stickyFusionTgt['o:id']) {
+        toast('Les deux concepts sont identiques', 'err');
+        return;
+    }
+    const srcLabel = getLabel(stickyFusionSrc);
+    const tgtLabel = getLabel(stickyFusionTgt);
+    document.getElementById('confirmMsg').innerHTML =
+        `Fusionner <strong>${esc(srcLabel)}</strong> dans <strong>${esc(tgtLabel)}</strong> ?<br><br>
+        <strong style="color:var(--danger)">Cette action est irréversible.</strong>`;
+    pendingFusion = {
+        srcId: stickyFusionSrc['o:id'],
+        tgtId: stickyFusionTgt['o:id'],
+        srcLabel,
+        tgtLabel,
+    };
+    document.getElementById('confirmOverlay').classList.add('open');
+});
+
+
+// ──────────────────────────────────────────────
+// UTILS
+// ──────────────────────────────────────────────
+
+// Retourne le label le plus pertinent d'un item Omeka S
+function getLabel(item) {
+    if (item['o:title']) return item['o:title'];
+    for (const p of ['skos:prefLabel', 'dcterms:title']) {
+        const v = item[p];
+        if (v && v.length && v[0]['@value']) return v[0]['@value'];
+    }
+    return `Item #${item['o:id']}`;
+}
+
+// Échappe le HTML pour éviter les injections XSS
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+}
+
+// Détecte une erreur CORS/réseau
+function isCorsError(msg) {
+    return /failed to fetch|cors|network error|load failed|access-control/i.test(msg);
+}
+
+// Traduit un message d'erreur technique en langage lisible
+function humanizeError(msg) {
+    if (isCorsError(msg)) return 'Erreur réseau (CORS) — le serveur bloque les requêtes depuis cette origine.';
+    if (/404/.test(msg))  return 'Ressource introuvable (404).';
+    if (/401|403/.test(msg)) return 'Accès refusé — vérifiez vos clés API.';
+    if (/500/.test(msg))  return 'Erreur serveur (500) — problème côté Omeka S.';
+    return msg;
+}
+
+// Affiche un toast
+// type : 'ok' | 'err' | 'info'
+// detail : message technique optionnel (affiché via "détails ▾")
+function toast(msg, type = 'info', detail = null) {
+    const c  = document.getElementById('toasts');
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+
+    const human     = type === 'err' ? humanizeError(msg) : msg;
+    const hasDetail = detail || (type === 'err' && human !== msg);
+    const rawDetail = detail || msg;
+
+    if (hasDetail) {
+        el.innerHTML = `
+            <div class="toast-main">
+                <span>${esc(human)}</span>
+                <button class="toast-detail-btn">détails ▾</button>
+            </div>
+            <div class="toast-detail hidden">${esc(rawDetail)}</div>`;
+        el.querySelector('.toast-detail-btn').addEventListener('click', function () {
+            const panel = el.querySelector('.toast-detail');
+            const open  = !panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', open);
+            this.textContent = open ? 'détails ▾' : 'masquer ▴';
+        });
+    } else {
+        el.textContent = human;
+    }
+
+    c.appendChild(el);
+    // Les erreurs restent 9s (temps de lire + cliquer "détails"), les autres 3.2s
+    setTimeout(() => {
+        el.style.opacity   = '0';
+        el.style.transform = 'translateX(40px)';
+        setTimeout(() => el.remove(), 320);
+    }, type === 'err' ? 9000 : 3200);
+}
+
+</script>
