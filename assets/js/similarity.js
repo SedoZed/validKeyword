@@ -132,7 +132,29 @@ export function compare(labelA, labelB) {
 // Retourne les paires triées par score décroissant.
 // ──────────────────────────────────────────────
 
-const MIN_PAIR_SCORE = 0.70; // Score minimum pour qu'une paire soit retournée
+const MIN_PAIR_SCORE        = 0.70; // Score minimum pour une paire textuelle
+const MIN_WIKIDATA_TEXT     = 0.50; // Similarité textuelle minimum pour valider un match Wikidata
+const WIKIDATA_WEIGHT       = 0.55; // Poids du signal Wikidata dans le score combiné
+const TEXT_WEIGHT           = 0.45; // Poids du signal textuel dans le score combiné
+
+// Extrait l'ID Wikidata (ex. "Q11660") depuis dcterms:isReferencedBy
+// Gère deux formats : URI (https://www.wikidata.org/wiki/Q11660) et identifiant (wikidata_Q11660)
+export function extractWikidataId(item) {
+    const refs = item['dcterms:isReferencedBy'] || [];
+    for (const ref of refs) {
+        // Format URI : { '@id': 'https://www.wikidata.org/wiki/Q11660' }
+        if (ref['@id']) {
+            const m = ref['@id'].match(/Q\d+/);
+            if (m) return m[0];
+        }
+        // Format identifiant : { '@value': 'wikidata_Q11660' }
+        if (ref['@value']) {
+            const m = ref['@value'].match(/Q\d+/);
+            if (m) return m[0];
+        }
+    }
+    return null;
+}
 
 export function findPairs(concepts) {
     const pairs = [];
@@ -148,10 +170,49 @@ export function findPairs(concepts) {
 
     for (let i = 0; i < concepts.length; i++) {
         for (let j = i + 1; j < concepts.length; j++) {
-            const labelsA = getLabels(concepts[i]);
-            const labelsB = getLabels(concepts[j]);
+            const cA = concepts[i];
+            const cB = concepts[j];
+
+            // Priorité 1 : même ID Wikidata
+            // Nécessaire mais pas suffisant : on vérifie aussi la similarité textuelle
+            // pour éviter les faux positifs (traductions, synonymes intentionnellement séparés)
+            const wdA = extractWikidataId(cA);
+            const wdB = extractWikidataId(cB);
+            if (wdA && wdB && wdA === wdB) {
+                const labelsA = getLabels(cA);
+                const labelsB = getLabels(cB);
+                // Cherche la meilleure similarité textuelle entre les labels
+                let bestTextScore = 0;
+                let bestLabels    = { labelA: labelsA[0] || `#${cA['o:id']}`, labelB: labelsB[0] || `#${cB['o:id']}` };
+                for (const la of labelsA) {
+                    for (const lb of labelsB) {
+                        const normA = normalize(la), normB = normalize(lb);
+                        if (normA && normB) {
+                            const s = levenshteinScore(normA, normB);
+                            if (s > bestTextScore) { bestTextScore = s; bestLabels = { labelA: la, labelB: lb }; }
+                        }
+                    }
+                }
+                // Valide la paire uniquement si les labels sont suffisamment proches
+                if (bestTextScore >= MIN_WIKIDATA_TEXT) {
+                    const combinedScore = WIKIDATA_WEIGHT * 1.0 + TEXT_WEIGHT * bestTextScore;
+                    pairs.push({
+                        a:        cA,
+                        b:        cB,
+                        score:    combinedScore,
+                        reason:   'Même concept Wikidata',
+                        labelA:   bestLabels.labelA,
+                        labelB:   bestLabels.labelB,
+                        wikidata: wdA,
+                    });
+                }
+                continue; // dans tous les cas on ne lance pas le pipeline textuel
+            }
+
+            // Priorité 2 : comparaison textuelle habituelle
+            const labelsA = getLabels(cA);
+            const labelsB = getLabels(cB);
             let best = null;
-            // Cherche la paire de labels la plus similaire entre les deux concepts
             for (const la of labelsA) {
                 for (const lb of labelsB) {
                     const result = compare(la, lb);
@@ -161,8 +222,8 @@ export function findPairs(concepts) {
             }
             if (best) {
                 pairs.push({
-                    a:      concepts[i],
-                    b:      concepts[j],
+                    a:      cA,
+                    b:      cB,
                     score:  best.score,
                     reason: best.reason,
                     labelA: best.labelA,

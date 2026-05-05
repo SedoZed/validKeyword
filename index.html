@@ -149,6 +149,14 @@
                 <option value="alpha">↕ A–Z</option>
             </select>
             <span class="progress-counter" id="progressCounter"></span>
+            <div class="cluster-chips" id="clusterChips">
+                <button class="cluster-chip active" data-type="all">Tous</button>
+                <button class="cluster-chip" data-type="wikidata">Wikidata</button>
+                <button class="cluster-chip" data-type="text">Textuel</button>
+                <button class="cluster-chip" data-type="ortho">Variante ortho.</button>
+                <button class="cluster-chip" data-type="plural">Singulier / pluriel</button>
+                <button class="cluster-chip" data-type="tokens">Termes inclus</button>
+            </div>
         </div>
 
         <div class="loading-state hidden" id="detectLoading">
@@ -195,7 +203,7 @@
 
 import { pa }                    from './assets/js/authParams.js';
 import { auth }                  from './assets/js/auth.js';
-import { findPairs, buildClusters } from './assets/js/similarity.js';
+import { findPairs, buildClusters, extractWikidataId } from './assets/js/similarity.js';
 
 
 // ──────────────────────────────────────────────
@@ -229,10 +237,12 @@ let idClassKW = 0;
 let currentPairs    = [];   // toutes les paires de la dernière analyse
 let allConcepts     = [];   // tous les concepts chargés
 let currentClusters = [];   // clusters actifs (peuvent être filtrés/triés)
+let wikidataIndex   = {};   // { wikidataId → [{ id: o:id, label }] } — doublons certains
 
 // État de l'UI — liste des clusters
-let clusterFilter = '';     // texte de recherche dans les clusters
-let clusterSort   = 'score'; // critère de tri : 'score' | 'size' | 'alpha'
+let clusterFilter     = '';      // texte de recherche dans les clusters
+let clusterSort       = 'score'; // critère de tri : 'score' | 'size' | 'alpha'
+let clusterTypeFilter = 'all';   // filtre par type : 'all' | 'wikidata' | 'text' | 'ortho' | 'plural' | 'tokens'
 
 // État de l'UI — browse
 let browseTimer = null;
@@ -271,8 +281,9 @@ function saveCache(clusters) {
             id:        cl.id,
             bestScore: cl.bestScore,
             concepts:  cl.concepts.map(c => ({
-                'o:id':   c['o:id'],
-                'o:title': getLabel(c)
+                'o:id':                  c['o:id'],
+                'o:title':               getLabel(c),
+                'dcterms:isReferencedBy': c['dcterms:isReferencedBy'] || []
             })),
             // On stocke aId/bId pour que pairKey() fonctionne même après restauration
             pairs: cl.pairs.map(p => ({
@@ -310,6 +321,20 @@ function clearCache() {
     localStorage.removeItem(SCROLL_KEY);
     deletedIds  = new Set();
     doneLetters = new Set();
+}
+
+// Construit un index wikidataId → [concepts] pour détecter les doublons certains dans le Browse
+function buildWikidataIndex(concepts) {
+    const idx = {};
+    concepts.forEach(c => {
+        const wdId = extractWikidataId(c);
+        if (!wdId) return;
+        if (!idx[wdId]) idx[wdId] = [];
+        idx[wdId].push({ id: c['o:id'], label: getLabel(c) });
+    });
+    // Ne conserve que les IDs avec plusieurs concepts (vrais doublons)
+    Object.keys(idx).forEach(k => { if (idx[k].length < 2) delete idx[k]; });
+    return idx;
 }
 
 function showCacheBanner(scannedAt) {
@@ -484,6 +509,15 @@ document.getElementById('clusterSort').addEventListener('change', function () {
     sortAndRenderClusters();
 });
 
+document.querySelectorAll('.cluster-chip').forEach(chip => {
+    chip.addEventListener('click', function () {
+        document.querySelectorAll('.cluster-chip').forEach(c => c.classList.remove('active'));
+        this.classList.add('active');
+        clusterTypeFilter = this.dataset.type;
+        applyClusterFilter();
+    });
+});
+
 // Confirmation de fusion
 document.getElementById('btnConfirmCancel').addEventListener('click', () => {
     document.getElementById('confirmOverlay').classList.remove('open');
@@ -524,11 +558,23 @@ function showClustersToolbar() {
     document.getElementById('clustersToolbar').classList.remove('hidden');
 }
 
-// Affiche/masque les cartes selon le filtre texte
+// Affiche/masque les cartes selon le filtre texte ET le filtre par type
 function applyClusterFilter() {
+    const typeMap = {
+        'wikidata': r => r.includes('Wikidata'),
+        'text':     r => !r.includes('Wikidata'),
+        'ortho':    r => r.includes('Variante orthographique'),
+        'plural':   r => r.includes('Singulier'),
+        'tokens':   r => r.includes('Termes inclus'),
+    };
     document.querySelectorAll('.pair-card[data-clid]').forEach(card => {
-        if (!clusterFilter) { card.style.display = ''; return; }
-        card.style.display = card.textContent.toLowerCase().includes(clusterFilter) ? '' : 'none';
+        const matchText = !clusterFilter || card.textContent.toLowerCase().includes(clusterFilter);
+        let   matchType = true;
+        if (clusterTypeFilter !== 'all') {
+            const reasons = card.querySelector('.pair-reason')?.textContent || '';
+            matchType = (typeMap[clusterTypeFilter] || (() => true))(reasons);
+        }
+        card.style.display = matchText && matchType ? '' : 'none';
     });
 }
 
@@ -615,6 +661,7 @@ async function scanAll() {
     allConcepts     = allConceptsG;
     const clusters  = buildClusters(allPairs, allConceptsG);
     currentClusters = clusters;
+    wikidataIndex   = buildWikidataIndex(allConceptsG);
 
     document.getElementById('detectLoading').classList.add('hidden');
     document.getElementById('scanProgress').classList.add('hidden');
@@ -668,6 +715,7 @@ async function scanLetter(letter, silent = false) {
         currentPairs    = pairs;
         allConcepts     = concepts;
         currentClusters = clusters;
+        wikidataIndex   = buildWikidataIndex(concepts);
         document.getElementById('detectLoading').classList.add('hidden');
         document.getElementById('scanStatus').textContent =
             `Lettre ${letter} — ${concepts.length} concept${concepts.length !== 1 ? 's' : ''} analysé${concepts.length !== 1 ? 's' : ''}` +
@@ -695,10 +743,16 @@ async function scanLetter(letter, silent = false) {
 // Génère le HTML d'un concept dans la liste d'un cluster
 function conceptItemHTML(c, clid, i) {
     const label = getLabel(c);
+    const wdId  = extractWikidataId(c);
+    const wdLink = wdId
+        ? `<a class="concept-wd-link" href="https://www.wikidata.org/wiki/${wdId}" target="_blank"
+            title="Voir sur Wikidata" onclick="event.stopPropagation()">${wdId} ↗</a>`
+        : '';
     return `<label class="cluster-concept">
         <input type="radio" name="keep-${clid}" value="${c['o:id']}" data-label="${esc(label)}" ${i === 0 ? 'checked' : ''} />
         <span class="cluster-concept-label">${esc(label)}</span>
         <span class="ac-id">#${c['o:id']}</span>
+        ${wdLink}
         <button class="btn-remove-concept"
             data-action="remove-concept"
             data-clid="${clid}"
@@ -717,14 +771,20 @@ function renderClusters(clusters) {
         const scoreDisp   = Math.round(cl.bestScore * 100) + '%';
         const conceptsHTML = cl.concepts.map((c, i) => conceptItemHTML(c, cl.id, i)).join('');
         const reasons      = [...new Set(cl.pairs.map(p => p.reason))].join(' · ');
+        const wdId         = cl.pairs[0]?.wikidata;
+        const wdBadge      = wdId
+            ? `<a class="wikidata-badge" href="https://www.wikidata.org/wiki/${wdId}" target="_blank" title="Voir sur Wikidata">Wikidata ${wdId} ↗</a>`
+            : '';
         const scoreAttr    = cl.bestScore >= 0.9 ? 'data-score-high' : cl.bestScore >= 0.75 ? 'data-score-medium' : '';
-        return `<div class="pair-card" data-clid="${cl.id}" ${scoreAttr}>
+        const wdAttr       = wdId ? 'data-wikidata-certain' : '';
+        return `<div class="pair-card" data-clid="${cl.id}" ${scoreAttr} ${wdAttr}>
             <div class="pair-main">
                 <div class="pair-info">
                     <div class="cluster-header">
                         <span class="cluster-count">${cl.concepts.length} concepts similaires</span>
                         <span class="pair-score">${scoreDisp}</span>
                         <span class="pair-reason">${esc(reasons)}</span>
+                        ${wdBadge}
                     </div>
                     <div class="cluster-concepts" id="cc-${cl.id}">${conceptsHTML}</div>
                     <div class="cluster-hint">
@@ -1188,10 +1248,20 @@ function renderBrowseList(items, hasMore) {
             ? `<button class="browse-cl-badge" data-action="goto-cluster" data-id="${id}"
                 title="Voir le groupe de doublons">⚠ ${clCount} groupe${clCount > 1 ? 's' : ''}</button>`
             : '';
+        // Badge doublon Wikidata certain (index construit au scan)
+        const wdId     = extractWikidataId(item);
+        const wdDups   = wdId && wikidataIndex[wdId]
+            ? wikidataIndex[wdId].filter(c => c.id !== id)
+            : [];
+        const wdBadge  = wdDups.length > 0
+            ? `<button class="browse-wd-badge" data-action="show-wd-dups" data-id="${id}"
+                title="Doublon Wikidata détecté">⚡ Doublon Wikidata</button>`
+            : '';
         return `<div class="browse-item">
             <div class="browse-item-name">${esc(label)}</div>
             <div class="browse-item-meta">
                 <span class="browse-id">#${id}</span>
+                ${wdBadge}
                 ${clBadge}
                 <button class="btn btn-sm btn-ghost" data-action="src" data-id="${id}" data-label="${esc(label)}">→ Source</button>
                 <button class="btn btn-sm btn-ghost" data-action="tgt" data-id="${id}" data-label="${esc(label)}">→ Cible</button>
@@ -1200,6 +1270,19 @@ function renderBrowseList(items, hasMore) {
     }).join('');
 
     // Listeners
+    list.querySelectorAll('[data-action="show-wd-dups"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id    = parseInt(btn.dataset.id);
+            const item  = items.find(i => i['o:id'] === id);
+            if (!item) return;
+            const wdId  = extractWikidataId(item);
+            const dups  = wdId && wikidataIndex[wdId] ? wikidataIndex[wdId].filter(c => c.id !== id) : [];
+            if (!dups.length) return;
+            const names = dups.map(d => `« ${d.label} » #${d.id}`).join(', ');
+            toast(`Doublon Wikidata (${wdId}) : ${names}`, 'err');
+        });
+    });
+
     list.querySelectorAll('[data-action="goto-cluster"]').forEach(btn => {
         btn.addEventListener('click', () => {
             const conceptId = parseInt(btn.dataset.id);
