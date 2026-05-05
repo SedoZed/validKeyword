@@ -13,6 +13,7 @@
 <header>
     <h1>🧹 cleanKeywords</h1>
     <div class="header-right">
+        <span id="scopeInfo" class="scope-info"></span>
         <span id="creator"></span>
         <button class="btn btn-sm btn-ghost" id="btnOpenSettings" style="color:#fff;border-color:rgba(255,255,255,.3)">⚙ Paramètres</button>
     </div>
@@ -38,6 +39,11 @@
         <div class="form-group">
             <label>key_credential</label>
             <input type="password" id="cfgKeyCred" />
+        </div>
+        <div class="form-group">
+            <label>ID de l'évaluateur</label>
+            <input type="text" id="cfgCreatorId" placeholder="o:id de votre item Omeka S" />
+            <div class="form-hint">Utilisé pour déterminer vos laboratoires autorisés via <code>valo:responsableDe</code>.</div>
         </div>
         <div class="form-group">
             <label>Propriétés mots-clefs des personnes</label>
@@ -220,11 +226,12 @@ const ALPHABET       = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 // Configuration (initialisée depuis authParams.js, puis depuis localStorage)
 let cfg = {
-    apiBase:       pa.apiOmk,
-    keyId:         pa.ident,
-    keyCred:       pa.key,
-    propMail:      pa.mail,
-    personPropExp: pa.personPropExp,
+    apiBase:         pa.apiOmk,
+    keyId:           pa.ident,
+    keyCred:         pa.key,
+    propMail:        pa.mail,
+    creatorId:       pa.creatorId,
+    personPropExp:   pa.personPropExp,
 };
 
 // Couche d'accès Omeka S (instanciée après authentification)
@@ -232,6 +239,11 @@ let a = null;
 
 // ID de la classe skos:Concept dans Omeka S (résolu au login)
 let idClassKW = 0;
+
+// Périmètre de l'opérateur connecté
+// null = global_admin (pas de restriction)
+// Set  = IDs des skos:Concept autorisés (issus des labos de l'opérateur)
+let allowedConceptIds = null;
 
 // Données de scan
 let currentPairs    = [];   // toutes les paires de la dernière analyse
@@ -274,9 +286,11 @@ let rejected = new Set(JSON.parse(localStorage.getItem(REJECT_KEY) || '[]'));
 // éviter de tout recharger à chaque session.
 // ──────────────────────────────────────────────
 
-function saveCache(clusters) {
+function saveCache(clusters, totalConcepts = 0) {
     const payload = {
-        scannedAt: Date.now(),
+        scannedAt:     Date.now(),
+        totalConcepts: totalConcepts,
+        totalClusters: clusters.length,
         clusters:  clusters.map(cl => ({
             id:        cl.id,
             bestScore: cl.bestScore,
@@ -337,10 +351,12 @@ function buildWikidataIndex(concepts) {
     return idx;
 }
 
-function showCacheBanner(scannedAt) {
+function showCacheBanner(scannedAt, totalConcepts, totalClusters) {
     const date = new Date(scannedAt).toLocaleString('fr-FR');
     document.getElementById('cacheBanner').classList.remove('hidden');
-    document.getElementById('cacheBannerDate').textContent = date;
+    const conceptsInfo = totalConcepts ? ` · ${totalConcepts} concepts analysés` : '';
+    const clustersInfo = totalClusters != null ? ` · ${totalClusters} groupes détectés` : '';
+    document.getElementById('cacheBannerDate').textContent = `${date}${conceptsInfo}${clustersInfo}`;
 }
 
 function hideCacheBanner() {
@@ -369,10 +385,13 @@ function hideCacheBanner() {
         const cache = loadCache();
         if (cache && cache.clusters.length) {
             currentClusters = cache.clusters;
+            // Reconstruit l'index Wikidata depuis les concepts du cache
+            const cachedConcepts = cache.clusters.flatMap(cl => cl.concepts);
+            wikidataIndex = buildWikidataIndex(cachedConcepts);
             document.getElementById('introBanner').classList.add('hidden');
             document.getElementById('scanStatus').textContent =
                 `${cache.clusters.length} groupe${cache.clusters.length > 1 ? 's' : ''} en cache.`;
-            showCacheBanner(cache.scannedAt);
+            showCacheBanner(cache.scannedAt, cache.totalConcepts, cache.totalClusters);
             renderClusters(cache.clusters);
             markStaleConcepts();
             showClustersToolbar();
@@ -392,6 +411,7 @@ function openSettings() {
     document.getElementById('cfgPropMail').value      = cfg.propMail      || '';
     document.getElementById('cfgKeyId').value         = cfg.keyId         || '';
     document.getElementById('cfgKeyCred').value       = cfg.keyCred       || '';
+    document.getElementById('cfgCreatorId').value     = cfg.creatorId     || '';
     document.getElementById('cfgPersonPropExp').value = cfg.personPropExp || '';
     document.querySelectorAll('#settingsOverlay .input-error')
         .forEach(el => el.classList.remove('input-error'));
@@ -427,6 +447,7 @@ async function saveSettings() {
         propMail:      document.getElementById('cfgPropMail').value.trim(),
         keyId:         document.getElementById('cfgKeyId').value.trim(),
         keyCred:       document.getElementById('cfgKeyCred').value.trim(),
+        creatorId:     document.getElementById('cfgCreatorId').value.trim(),
         personPropExp: document.getElementById('cfgPersonPropExp').value.trim() || pa.personPropExp,
     };
 
@@ -462,6 +483,58 @@ async function saveSettings() {
 
     idClassKW = a.omk.getClassByTerm('skos:Concept')['o:id'];
     d3.select('#creator').text(a.user['o:name'] || a.user['o:email'] || '');
+
+    // ── Calcul du périmètre ──────────────────────────────────────────
+    if (a.userAdmin || !cfg.creatorId) {
+        // global_admin ou pas de creatorId configuré → pas de restriction
+        allowedConceptIds = null;
+        d3.select('#scopeInfo').text('Périmètre : tous les concepts');
+    } else {
+        d3.select('#scopeInfo').text('Calcul du périmètre…');
+        try {
+            // 1. Récupère les labos autorisés depuis l'item opérateur
+            const creator  = a.omk.getItem(cfg.creatorId);
+            const labVals  = creator['valo:responsableDe'] || [];
+            const labIds   = labVals.filter(v => v.value_resource_id).map(v => parseInt(v.value_resource_id));
+
+            if (!labIds.length) {
+                allowedConceptIds = null;
+                d3.select('#scopeInfo').text('Périmètre : tous les concepts (aucun labo configuré)');
+            } else {
+                // 2. Charge tous les ECs des labos autorisés
+                const isPartOfId  = a.omk.getPropId('dcterms:isPartOf');
+                const idClassPerson = a.omk.getClassByTerm('valo:EnseignantChercheur')['o:id'];
+                let allEcs = [];
+                for (const labId of labIds) {
+                    const ecs = a.omk.searchItems(
+                        `resource_class_id[]=${idClassPerson}` +
+                        `&property[0][property]=${isPartOfId}&property[0][type]=res&property[0][text]=${labId}` +
+                        `&per_page=1000`
+                    );
+                    if (Array.isArray(ecs)) allEcs = allEcs.concat(ecs);
+                }
+
+                // 3. Extrait tous les keyword IDs référencés par ces ECs
+                const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+                allowedConceptIds = new Set();
+                allEcs.forEach(ec => {
+                    propList.forEach(prop => {
+                        (ec[prop] || []).forEach(v => {
+                            if (v.value_resource_id) allowedConceptIds.add(parseInt(v.value_resource_id));
+                        });
+                    });
+                });
+
+                d3.select('#scopeInfo').text(
+                    `Périmètre : ${allowedConceptIds.size} mot${allowedConceptIds.size > 1 ? 's' : ''}-clef${allowedConceptIds.size > 1 ? 's' : ''} (${labIds.length} labo${labIds.length > 1 ? 's' : ''})`
+                );
+            }
+        } catch (e) {
+            allowedConceptIds = null;
+            toast('Erreur lors du calcul du périmètre — accès complet utilisé', 'err', e.message);
+            d3.select('#scopeInfo').text('Périmètre : tous les concepts (erreur)');
+        }
+    }
     closeSettings();
     toast('Connecté', 'ok');
     buildAlphaBar();
@@ -671,7 +744,8 @@ async function scanAll() {
         `${clusters.length} groupe${clusters.length !== 1 ? 's' : ''} de doublons détecté${clusters.length !== 1 ? 's' : ''}.`;
 
     renderClusters(clusters);
-    saveCache(clusters);
+    saveCache(clusters, allConceptsG.length);
+    showCacheBanner(Date.now(), allConceptsG.length, clusters.length);
     showClustersToolbar();
     updateProgressCounter();
     buildAlphaBar();
@@ -702,6 +776,10 @@ async function scanLetter(letter, silent = false) {
             `&per_page=500&sort_by=title&sort_order=asc`
         );
         concepts = Array.isArray(result) ? result : [];
+        // Filtre par périmètre si l'opérateur n'est pas global_admin
+        if (allowedConceptIds !== null) {
+            concepts = concepts.filter(c => allowedConceptIds.has(c['o:id']));
+        }
     } catch (e) {
         if (!silent) toast('Erreur lors du chargement', 'err', e.message);
     }
@@ -723,7 +801,8 @@ async function scanLetter(letter, silent = false) {
                 ? ` → ${clusters.length} groupe${clusters.length !== 1 ? 's' : ''} de doublons détecté${clusters.length !== 1 ? 's' : ''}.`
                 : ` → aucun doublon détecté ✅`);
         renderClusters(clusters);
-        saveCache(clusters);
+        saveCache(clusters, concepts.length);
+        showCacheBanner(Date.now(), concepts.length, clusters.length);
         showClustersToolbar();
         updateProgressCounter();
         buildAlphaBar();

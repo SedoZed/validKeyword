@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.2] — 2026-05-05
+
+### Nouvelles fonctionnalités
+
+**Filtrage par périmètre opérateur (`index.html`, `authParams.js`)**
+Chaque opérateur connecté ne voit désormais que les mots-clefs appartenant aux ECs
+de ses laboratoires (via `valo:responsableDe` sur son item Omeka S).
+Au login, l'app charge les ECs des labos autorisés et construit un Set des keyword IDs
+autorisés — seuls ces concepts apparaissent dans les scans et les clusters.
+Les global admins conservent un accès complet sans restriction.
+Un indicateur de périmètre est affiché dans le header : *"Périmètre : X mots-clefs (Y labos)"*.
+Un nouveau champ "ID de l'évaluateur" est ajouté dans le panel Paramètres.
+
+**Statistiques dans le bandeau de cache (`index.html`)**
+Le bandeau de cache affiche désormais le nombre de concepts analysés et le nombre
+de groupes détectés lors du dernier scan, en plus de la date.
+Ces stats sont stockées dans le cache et restituées fidèlement au rechargement.
+
+### Correctifs
+
+- L'index Wikidata (`wikidataIndex`) n'était pas reconstruit lors de la restauration
+  du cache au rechargement — les badges "⚡ Doublon Wikidata" dans le Browse étaient
+  donc vides après un reload. Corrigé.
+- `saveCache` capturait `allConcepts.length` depuis la variable globale plutôt que
+  depuis les données fraîches du scan — le compteur de concepts pouvait être à 0.
+  `totalConcepts` est maintenant passé explicitement en paramètre.
+
+
+---
+
 ## [0.1.1] — 2026-05-05
 
 ### Nouvelles fonctionnalités — Intégration Wikidata

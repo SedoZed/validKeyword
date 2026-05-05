@@ -606,3 +606,11 @@ header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
     transition: opacity .15s;
 }
 .concept-wd-link:hover { opacity: 1; text-decoration: underline; }
+
+/* ── SCOPE INFO ── */
+.scope-info {
+    font-size: .75rem;
+    opacity: .7;
+    font-style: italic;
+    white-space: nowrap;
+}
