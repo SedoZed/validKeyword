@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.1.3] — 2026-05-12
+ 
+### Nouvelles fonctionnalités
+ 
+**ECs rattachés à un concept (`index.html`, `main.css`)**
+Dans l'onglet Browse, le nom de chaque concept est désormais cliquable. Un clic ouvre un accordéon affichant la liste des ECs qui référencent ce concept via les propriétés `personPropExp`. Les résultats sont chargés à la demande (premier clic uniquement) et dédupliqués cross-propriétés. Un message explicite s'affiche si aucun EC n'est rattaché.
+ 
+**Badge "💡 Suggestion EC" dans le Browse (`index.html`, `main.css`)**
+Les concepts créés par un EC (marqués `dcterms:description = "suggestion"`) affichent désormais un badge violet dans le Browse, en cohérence avec le badge déjà présent dans les clusters.
+ 
+**Bouton 🔄 Recalcul du périmètre (`index.html`)**
+Un bouton discret dans le header permet de recalculer le périmètre de l'opérateur sans se déconnecter. Il n'est visible que lorsqu'un périmètre restreint est actif. `refreshScope()` est désormais une fonction dédiée, appelée par `saveSettings()` et par ce bouton.
+ 
+**Navigation inter-outils (`index.html`, `main.css`)**
+Le titre de l'application dans le header est désormais cliquable et ouvre un menu déroulant listant les outils disponibles (`cleanKeywords`, `validExpertises`). L'outil courant est mis en évidence et non-cliquable. Le menu affiche également le numéro de version en bas.
+ 
+### Améliorations
+ 
+**Pagination client en mode périmètre restreint (`index.html`)**
+En mode opérateur restreint, le Browse bascule en pagination côté client : tous les concepts du périmètre sont chargés en une seule passe, filtrés sur `allowedConceptIds`, puis découpés par tranches de 30. Cela garantit des pages toujours pleines et un compteur exact. Le cache de pagination est invalidé lors d'un changement de recherche, de tri ou de recalcul de périmètre. En mode admin, la pagination serveur est conservée.
+ 
+**Compteur enrichi dans la pagination (`index.html`)**
+En mode restreint, la pagination affiche désormais `"X concepts — page Y / Z"` pour donner une vision immédiate du volume total. En mode admin, l'affichage reste `"Page N"`.
+ 
+**Rechargement automatique du Browse après scan (`index.html`)**
+Après `scanAll` ou `scanLetter`, si l'onglet Browse est actif, il est automatiquement rechargé pour refléter les nouveaux badges de clusters.
+ 
+**Avertissement de cache obsolète (`index.html`, `main.css`)**
+Si le cache a plus de 24h, le bandeau de cache passe en orange avec le message *"⚠ Cache de plus de 24h — données potentiellement obsolètes"*. Aucun effacement automatique — l'utilisateur garde le contrôle.
+ 
+### Correctifs
+ 
+**`pairKey()` — clé bidirectionnelle non normalisée (`index.html`)**
+La clé d'une paire (`idA_idB`) pouvait être générée dans un ordre différent selon le contexte (scan frais vs restauration depuis le cache), empêchant la détection des paires déjà rejetées. La clé est désormais toujours triée numériquement (`min_max`).
+ 
+**Browse non filtré par périmètre (`index.html`)**
+L'onglet Browse listait tous les concepts de la base sans tenir compte du périmètre de l'opérateur. Il applique maintenant le même filtrage que les scans.
+
 ## [0.1.2] — 2026-05-05
 
 ### Nouvelles fonctionnalités

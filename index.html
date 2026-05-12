@@ -11,9 +11,25 @@
 
 <!-- ── HEADER ── -->
 <header>
-    <h1>🧹 cleanKeywords</h1>
+    <div class="app-switcher" id="appSwitcher">
+        <div class="app-switcher-icon" aria-hidden="true">
+            <span></span><span></span><span></span>
+        </div>
+        <h1>🧹 cleanKeywords</h1>
+        <div class="app-dropdown" id="appDropdown">
+            <div class="app-dropdown-header">Outils</div>
+            <div class="app-dropdown-item app-dropdown-item--active">
+                <span class="app-dropdown-dot"></span>🧹 cleanKeywords
+            </div>
+            <a class="app-dropdown-item" href="../validExpertises/">
+                <span class="app-dropdown-dot"></span>✅ validExpertises
+            </a>
+            <div class="app-dropdown-version">v0.1.3</div>
+        </div>
+    </div>
     <div class="header-right">
         <span id="scopeInfo" class="scope-info"></span>
+        <button class="btn btn-sm btn-ghost" id="btnRefreshScope" title="Recalculer le périmètre" style="color:#fff;border-color:rgba(255,255,255,.3);display:none">🔄</button>
         <span id="creator"></span>
         <button class="btn btn-sm btn-ghost" id="btnOpenSettings" style="color:#fff;border-color:rgba(255,255,255,.3)">⚙ Paramètres</button>
     </div>
@@ -257,10 +273,11 @@ let clusterSort       = 'score'; // critère de tri : 'score' | 'size' | 'alpha'
 let clusterTypeFilter = 'all';   // filtre par type : 'all' | 'wikidata' | 'text' | 'ortho' | 'plural' | 'tokens'
 
 // État de l'UI — browse
-let browseTimer = null;
-let browsePage  = 1;
-let browseSort  = 'title';
-let browseQuery = '';
+let browseTimer        = null;
+let browsePage         = 1;
+let browseSort         = 'title';
+let browseQuery        = '';
+let browseAllowedItems = null; // cache des items filtrés pour les opérateurs restreints (pagination client)
 
 // État de l'UI — fusion en cours
 let pendingFusion   = null; // { clid, keepId, keepLabel, toMerge } OU { srcId, tgtId, srcLabel, tgtLabel }
@@ -392,6 +409,14 @@ function hideCacheBanner() {
             document.getElementById('scanStatus').textContent =
                 `${cache.clusters.length} groupe${cache.clusters.length > 1 ? 's' : ''} en cache.`;
             showCacheBanner(cache.scannedAt, cache.totalConcepts, cache.totalClusters);
+            // Avertissement si le cache a plus de 24h
+            const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+            if (Date.now() - cache.scannedAt > CACHE_TTL_MS) {
+                const banner = document.getElementById('cacheBanner');
+                banner.classList.add('stale');
+                const dateEl = document.getElementById('cacheBannerDate');
+                dateEl.innerHTML = `⚠ Cache de plus de 24h — <em>données potentiellement obsolètes</em> · ` + dateEl.textContent;
+            }
             renderClusters(cache.clusters);
             markStaleConcepts();
             showClustersToolbar();
@@ -424,6 +449,15 @@ function closeSettings() {
 }
 
 document.getElementById('btnOpenSettings').addEventListener('click', openSettings);
+
+// ── APP SWITCHER ──────────────────────────────
+const appSwitcher  = document.getElementById('appSwitcher');
+const appDropdown  = document.getElementById('appDropdown');
+appSwitcher.addEventListener('click', e => {
+    e.stopPropagation();
+    appDropdown.classList.toggle('app-dropdown--open');
+});
+document.addEventListener('click', () => appDropdown.classList.remove('app-dropdown--open'));
 document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
 
 // Efface l'erreur d'un champ dès que l'utilisateur le modifie
@@ -484,61 +518,75 @@ async function saveSettings() {
     idClassKW = a.omk.getClassByTerm('skos:Concept')['o:id'];
     d3.select('#creator').text(a.user['o:name'] || a.user['o:email'] || '');
 
-    // ── Calcul du périmètre ──────────────────────────────────────────
-    if (a.userAdmin || !cfg.creatorId) {
-        // global_admin ou pas de creatorId configuré → pas de restriction
-        allowedConceptIds = null;
-        d3.select('#scopeInfo').text('Périmètre : tous les concepts');
-    } else {
-        d3.select('#scopeInfo').text('Calcul du périmètre…');
-        try {
-            // 1. Récupère les labos autorisés depuis l'item opérateur
-            const creator  = a.omk.getItem(cfg.creatorId);
-            const labVals  = creator['valo:responsableDe'] || [];
-            const labIds   = labVals.filter(v => v.value_resource_id).map(v => parseInt(v.value_resource_id));
-
-            if (!labIds.length) {
-                allowedConceptIds = null;
-                d3.select('#scopeInfo').text('Périmètre : tous les concepts (aucun labo configuré)');
-            } else {
-                // 2. Charge tous les ECs des labos autorisés
-                const isPartOfId  = a.omk.getPropId('dcterms:isPartOf');
-                const idClassPerson = a.omk.getClassByTerm('valo:EnseignantChercheur')['o:id'];
-                let allEcs = [];
-                for (const labId of labIds) {
-                    const ecs = a.omk.searchItems(
-                        `resource_class_id[]=${idClassPerson}` +
-                        `&property[0][property]=${isPartOfId}&property[0][type]=res&property[0][text]=${labId}` +
-                        `&per_page=1000`
-                    );
-                    if (Array.isArray(ecs)) allEcs = allEcs.concat(ecs);
-                }
-
-                // 3. Extrait tous les keyword IDs référencés par ces ECs
-                const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
-                allowedConceptIds = new Set();
-                allEcs.forEach(ec => {
-                    propList.forEach(prop => {
-                        (ec[prop] || []).forEach(v => {
-                            if (v.value_resource_id) allowedConceptIds.add(parseInt(v.value_resource_id));
-                        });
-                    });
-                });
-
-                d3.select('#scopeInfo').text(
-                    `Périmètre : ${allowedConceptIds.size} mot${allowedConceptIds.size > 1 ? 's' : ''}-clef${allowedConceptIds.size > 1 ? 's' : ''} (${labIds.length} labo${labIds.length > 1 ? 's' : ''})`
-                );
-            }
-        } catch (e) {
-            allowedConceptIds = null;
-            toast('Erreur lors du calcul du périmètre — accès complet utilisé', 'err', e.message);
-            d3.select('#scopeInfo').text('Périmètre : tous les concepts (erreur)');
-        }
-    }
+    await refreshScope();
     closeSettings();
     toast('Connecté', 'ok');
     buildAlphaBar();
 }
+
+// Recalcule le périmètre de l'opérateur sans refaire toute l'authentification
+async function refreshScope() {
+    if (!a) return;
+    if (a.userAdmin || !cfg.creatorId) {
+        allowedConceptIds = null;
+        d3.select('#scopeInfo').text('Périmètre : tous les concepts');
+        document.getElementById('btnRefreshScope').style.display = 'none';
+        return;
+    }
+    d3.select('#scopeInfo').text('Calcul du périmètre…');
+    try {
+        // 1. Récupère les labos autorisés depuis l'item opérateur
+        const creator  = a.omk.getItem(cfg.creatorId);
+        const labVals  = creator['valo:responsableDe'] || [];
+        const labIds   = labVals.filter(v => v.value_resource_id).map(v => parseInt(v.value_resource_id));
+
+        if (!labIds.length) {
+            allowedConceptIds = null;
+            d3.select('#scopeInfo').text('Périmètre : tous les concepts (aucun labo configuré)');
+            document.getElementById('btnRefreshScope').style.display = 'none';
+        } else {
+            // 2. Charge tous les ECs des labos autorisés
+            const isPartOfId    = a.omk.getPropId('dcterms:isPartOf');
+            const idClassPerson = a.omk.getClassByTerm('valo:EnseignantChercheur')['o:id'];
+            let allEcs = [];
+            for (const labId of labIds) {
+                const ecs = a.omk.searchItems(
+                    `resource_class_id[]=${idClassPerson}` +
+                    `&property[0][property]=${isPartOfId}&property[0][type]=res&property[0][text]=${labId}` +
+                    `&per_page=1000`
+                );
+                if (Array.isArray(ecs)) allEcs = allEcs.concat(ecs);
+            }
+
+            // 3. Extrait tous les keyword IDs référencés par ces ECs
+            const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+            allowedConceptIds = new Set();
+            allEcs.forEach(ec => {
+                propList.forEach(prop => {
+                    (ec[prop] || []).forEach(v => {
+                        if (v.value_resource_id) allowedConceptIds.add(parseInt(v.value_resource_id));
+                    });
+                });
+            });
+
+            d3.select('#scopeInfo').text(
+                `Périmètre : ${allowedConceptIds.size} mot${allowedConceptIds.size > 1 ? 's' : ''}-clef${allowedConceptIds.size > 1 ? 's' : ''} (${labIds.length} labo${labIds.length > 1 ? 's' : ''})`
+            );
+            document.getElementById('btnRefreshScope').style.display = '';
+        }
+    } catch (e) {
+        allowedConceptIds = null;
+        toast('Erreur lors du calcul du périmètre — accès complet utilisé', 'err', e.message);
+        d3.select('#scopeInfo').text('Périmètre : tous les concepts (erreur)');
+        document.getElementById('btnRefreshScope').style.display = 'none';
+    }
+}
+
+document.getElementById('btnRefreshScope').addEventListener('click', async () => {
+    await refreshScope();
+    browseAllowedItems = null;
+    toast('Périmètre recalculé', 'ok');
+});
 
 
 // ──────────────────────────────────────────────
@@ -702,7 +750,7 @@ function buildAlphaBar() {
 function pairKey(p) {
     const idA = p.a?.['o:id'] ?? p.aId;
     const idB = p.b?.['o:id'] ?? p.bId;
-    return `${idA}_${idB}`;
+    return `${Math.min(idA, idB)}_${Math.max(idA, idB)}`;
 }
 
 // Scan global : parcourt toutes les lettres en séquence
@@ -749,6 +797,11 @@ async function scanAll() {
     showClustersToolbar();
     updateProgressCounter();
     buildAlphaBar();
+    // Recharge le Browse si l'onglet est actif (les clusters ont changé, les badges aussi)
+    if (!document.getElementById('tabBrowse').classList.contains('hidden')) {
+        browseAllowedItems = null;
+        loadBrowse();
+    }
 }
 
 // Scan d'une lettre (mode interactif ou silencieux pour scanAll)
@@ -806,6 +859,11 @@ async function scanLetter(letter, silent = false) {
         showClustersToolbar();
         updateProgressCounter();
         buildAlphaBar();
+        // Recharge le Browse si l'onglet est actif
+        if (!document.getElementById('tabBrowse').classList.contains('hidden')) {
+            browseAllowedItems = null;
+            loadBrowse();
+        }
         // Marque la lettre comme traitée
         const btn = [...document.querySelectorAll('.alpha-btn')].find(b => b.textContent === letter);
         if (btn) { btn.classList.remove('active'); btn.classList.add('done'); }
@@ -1264,15 +1322,17 @@ function logFusion(msg, type = '') {
 
 document.getElementById('browseSearchInput').addEventListener('input', function () {
     clearTimeout(browseTimer);
-    browseQuery = this.value.trim();
-    browsePage  = 1;
+    browseQuery        = this.value.trim();
+    browsePage         = 1;
+    browseAllowedItems = null; // invalide le cache client (query changée)
     browseTimer = setTimeout(loadBrowse, 320);
 });
 
 document.getElementById('btnBrowseSort').addEventListener('click', function () {
-    browseSort       = browseSort === 'title' ? 'created' : 'title';
-    this.textContent = browseSort === 'title' ? '↕ Titre' : '↕ Date';
-    browsePage       = 1;
+    browseSort         = browseSort === 'title' ? 'created' : 'title';
+    this.textContent   = browseSort === 'title' ? '↕ Titre' : '↕ Date';
+    browsePage         = 1;
+    browseAllowedItems = null; // invalide le cache client (tri changé)
     loadBrowse();
 });
 
@@ -1288,17 +1348,73 @@ function loadBrowse() {
     document.getElementById('browseLoading').classList.remove('hidden');
     document.getElementById('browseList').innerHTML = '';
     document.getElementById('browsePagination').classList.add('hidden');
+
+    const PAGE_SIZE = 30;
+
     try {
-        const propTitleId = a.omk.getPropId('dcterms:title');
-        let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
-        if (browseQuery)
-            query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
-        const { items, hasMore } = a.omk.searchItemsPaginated(query, browsePage, 30);
-        document.getElementById('browseLoading').classList.add('hidden');
-        renderBrowseList(items, hasMore);
+        if (allowedConceptIds !== null) {
+            // ── Mode restreint : pagination client ──────────────────────────
+            // Recharge les items filtrés si la query a changé ou si le cache est vide
+            if (!browseAllowedItems) {
+                const propTitleId = a.omk.getPropId('dcterms:title');
+                let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
+                if (browseQuery)
+                    query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
+                const all = a.omk.getAllItems(query);
+                browseAllowedItems = (Array.isArray(all) ? all : [])
+                    .filter(c => allowedConceptIds.has(c['o:id']));
+            }
+            const start   = (browsePage - 1) * PAGE_SIZE;
+            const items   = browseAllowedItems.slice(start, start + PAGE_SIZE);
+            const hasMore = start + PAGE_SIZE < browseAllowedItems.length;
+            document.getElementById('browseLoading').classList.add('hidden');
+            renderBrowseList(items, hasMore);
+        } else {
+            // ── Mode admin : pagination serveur (comportement d'origine) ────
+            const propTitleId = a.omk.getPropId('dcterms:title');
+            let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
+            if (browseQuery)
+                query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
+            const { items, hasMore } = a.omk.searchItemsPaginated(query, browsePage, PAGE_SIZE);
+            document.getElementById('browseLoading').classList.add('hidden');
+            renderBrowseList(items, hasMore);
+        }
     } catch (e) {
         document.getElementById('browseLoading').classList.add('hidden');
         toast('Erreur lors du chargement', 'err', e.message);
+    }
+}
+
+// ──────────────────────────────────────────────
+// ECs RATTACHÉS À UN CONCEPT
+// Chargés à la demande au clic sur le nom du concept dans le Browse.
+// ──────────────────────────────────────────────
+
+function loadConceptEcs(conceptId, panelEl) {
+    panelEl.dataset.loaded = '1';
+    panelEl.innerHTML = `<span class="browse-ec-loading">Chargement…</span>`;
+    try {
+        const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+        const seen     = new Set();
+        const ecs      = [];
+        for (const prop of propList) {
+            const propId  = a.omk.getPropId(prop);
+            const results = a.omk.searchItems(
+                `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${conceptId}&per_page=1000`
+            );
+            (Array.isArray(results) ? results : []).forEach(ec => {
+                if (!seen.has(ec['o:id'])) { seen.add(ec['o:id']); ecs.push(ec); }
+            });
+        }
+        if (!ecs.length) {
+            panelEl.innerHTML = `<span class="browse-ec-empty">Aucun EC rattaché à ce concept.</span>`;
+            return;
+        }
+        panelEl.innerHTML = ecs.map(ec =>
+            `<span class="browse-ec-item">${esc(getLabel(ec))}<span class="browse-id">#${ec['o:id']}</span></span>`
+        ).join('');
+    } catch (e) {
+        panelEl.innerHTML = `<span class="browse-ec-empty">Erreur lors du chargement.</span>`;
     }
 }
 
@@ -1336,19 +1452,46 @@ function renderBrowseList(items, hasMore) {
             ? `<button class="browse-wd-badge" data-action="show-wd-dups" data-id="${id}"
                 title="Doublon Wikidata détecté">⚡ Doublon Wikidata</button>`
             : '';
+        // Badge suggestion EC
+        const isSuggestion = (item['dcterms:description'] || [])
+            .some(v => v['@value'] === 'suggestion');
+        const suggBadge = isSuggestion
+            ? `<span class="browse-sugg-badge" title="Concept suggéré par un EC">💡 Suggestion EC</span>`
+            : '';
         return `<div class="browse-item">
-            <div class="browse-item-name">${esc(label)}</div>
+            <div class="browse-item-name browse-item-name--clickable" data-action="toggle-ecs" data-id="${id}">
+                <span class="browse-ec-toggle">▶</span>${esc(label)}
+            </div>
             <div class="browse-item-meta">
                 <span class="browse-id">#${id}</span>
+                ${suggBadge}
                 ${wdBadge}
                 ${clBadge}
                 <button class="btn btn-sm btn-ghost" data-action="src" data-id="${id}" data-label="${esc(label)}">→ Source</button>
                 <button class="btn btn-sm btn-ghost" data-action="tgt" data-id="${id}" data-label="${esc(label)}">→ Cible</button>
             </div>
+            <div class="browse-ec-panel hidden" id="ec-panel-${id}"></div>
         </div>`;
     }).join('');
 
     // Listeners
+    list.querySelectorAll('[data-action="toggle-ecs"]').forEach(nameEl => {
+        nameEl.addEventListener('click', () => {
+            const id      = parseInt(nameEl.dataset.id);
+            const panel   = document.getElementById(`ec-panel-${id}`);
+            const toggle  = nameEl.querySelector('.browse-ec-toggle');
+            const isOpen  = !panel.classList.contains('hidden');
+            if (isOpen) {
+                panel.classList.add('hidden');
+                toggle.textContent = '▶';
+            } else {
+                panel.classList.remove('hidden');
+                toggle.textContent = '▼';
+                if (!panel.dataset.loaded) loadConceptEcs(id, panel);
+            }
+        });
+    });
+
     list.querySelectorAll('[data-action="show-wd-dups"]').forEach(btn => {
         btn.addEventListener('click', () => {
             const id    = parseInt(btn.dataset.id);
@@ -1403,7 +1546,14 @@ function renderBrowseList(items, hasMore) {
 
     const pag = document.getElementById('browsePagination');
     pag.classList.remove('hidden');
-    document.getElementById('browsePaginationInfo').textContent = `Page ${browsePage}`;
+    const total     = allowedConceptIds !== null && browseAllowedItems
+        ? browseAllowedItems.length
+        : null;
+    const pageTotal = total !== null ? Math.ceil(total / 30) : null;
+    const infoText  = total !== null
+        ? `${total} concept${total > 1 ? 's' : ''} — page ${browsePage}${pageTotal ? ' / ' + pageTotal : ''}`
+        : `Page ${browsePage}`;
+    document.getElementById('browsePaginationInfo').textContent = infoText;
     document.getElementById('btnBrowsePrev').disabled = browsePage <= 1;
     document.getElementById('btnBrowseNext').disabled = !hasMore;
 }
