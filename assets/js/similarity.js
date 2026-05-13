@@ -3,8 +3,8 @@
 //
 // Pipeline de détection :
 //   1. Normalisation (casse, accents, ponctuation)
-//   2. Dépluralisation (s/x final)
-//   3. Levenshtein ≤ 2 (variante orthographique)
+//   2. Dépluralisation token par token (s/x final)
+//   3. Levenshtein adaptatif (≤1 si <12 chars, ≤2 sinon)
 //   4. Inclusion de tokens significatifs
 //
 // Seuils configurables en bas de fichier.
@@ -35,10 +35,12 @@ export function normalize(str) {
         .trim();
 }
 
-// Supprime le s ou x final pour dépluraliser (ex. "écoles" → "école")
+// Dépluralise chaque token individuellement (ex. "valeurs sociales" → "valeur sociale")
 // Requiert au moins 3 caractères avant le pluriel pour éviter les faux positifs
 function depluralize(str) {
-    return str.replace(/([a-z]{3,})(?:s|x)$/, '$1');
+    return str.split(' ')
+        .map(token => token.replace(/([a-z]{3,})(?:s|x)$/, '$1'))
+        .join(' ');
 }
 
 // Distance de Levenshtein (programmation dynamique)
@@ -99,13 +101,34 @@ export function compare(labelA, labelB) {
     if (depluralize(normA) === depluralize(normB))
         return { score: 0.95, reason: 'Singulier / pluriel' };
 
-    // 3. Levenshtein — distance ≤ 2, longueurs proches (±20%)
+    // 3. Levenshtein adaptatif
+    // — dist ≤ 1 pour les chaînes courtes (< 12 chars) pour éviter les faux positifs
+    // — dist ≤ 2 pour les chaînes plus longues
+    // — Détection cross-langue : sur les labels multi-mots, si le token divergent
+    //   a une distance > 1 sur sa propre longueur, c'est probablement une traduction
+    const maxDist  = Math.min(normA.length, normB.length) < 12 ? 1 : 2;
     const dist     = levenshtein(normA, normB);
     const lenRatio = Math.min(normA.length, normB.length) / Math.max(normA.length, normB.length);
-    if (dist <= 2 && lenRatio >= 0.8) {
+    if (dist <= maxDist && lenRatio >= 0.8) {
+        // Détection cross-langue sur labels multi-mots
+        const wordsA = normA.split(' ');
+        const wordsB = normB.split(' ');
+        if (wordsA.length > 1 && wordsA.length === wordsB.length) {
+            const divergent = wordsA.filter((w, i) => w !== wordsB[i]);
+            const isCrossLang = divergent.some((w, i) => {
+                const wb = wordsB[wordsA.indexOf(w)];
+                if (!wb) return false;
+                // Si le token divergent est plus long que 5 chars et la distance relative > 30%
+                // → probable traduction, pas une variante orthographique
+                const tokenDist = levenshtein(w, wb);
+                const maxTok    = Math.max(w.length, wb.length);
+                return maxTok > 5 && tokenDist / maxTok > 0.25;
+            });
+            if (isCrossLang) return null;
+        }
         const score = levenshteinScore(normA, normB);
         if (score >= 0.7)
-                return { score, reason: 'Variante orthographique' };
+            return { score, reason: 'Variante orthographique' };
     }
 
     // 4. Inclusion de tokens significatifs
@@ -268,10 +291,25 @@ export function buildClusters(pairs, allConcepts) {
     }
 
     // Construit les groupes à partir des paires suffisamment similaires
+    // Garde-fou : on ne relie deux concepts que si leur paire est directement qualifiée,
+    // pas par transitivité aveugle — évite les faux clusters cross-thématiques
     const qualifiedPairs = pairs.filter(p => p.score >= MIN_CLUSTER_SCORE);
+
+    // Index des paires qualifiées par concept pour vérifier les liens directs
+    const directLinks = new Map();
+    qualifiedPairs.forEach(p => {
+        const idA = p.a['o:id'], idB = p.b['o:id'];
+        if (!directLinks.has(idA)) directLinks.set(idA, new Set());
+        if (!directLinks.has(idB)) directLinks.set(idB, new Set());
+        directLinks.get(idA).add(idB);
+        directLinks.get(idB).add(idA);
+    });
+
     qualifiedPairs.forEach(p => union(p.a['o:id'], p.b['o:id']));
 
     // Regroupe les concepts et paires par racine
+    // Un concept n'est inclus dans un groupe que s'il a au moins un lien direct
+    // avec un autre membre du groupe (évite les "passagers clandestins" transitifs)
     const groups = {};
     qualifiedPairs.forEach(p => {
         [p.a, p.b].forEach(concept => {
@@ -283,6 +321,15 @@ export function buildClusters(pairs, allConcepts) {
         const root = find(p.a['o:id']);
         groups[root].pairs.push(p);
         if (p.score > groups[root].bestScore) groups[root].bestScore = p.score;
+    });
+
+    // Retire les concepts sans lien direct avec les autres membres du groupe
+    Object.values(groups).forEach(g => {
+        const memberIds = new Set(g.concepts.map(c => c['o:id']));
+        g.concepts = g.concepts.filter(c => {
+            const links = directLinks.get(c['o:id']) || new Set();
+            return [...links].some(id => memberIds.has(id));
+        });
     });
 
     return Object.entries(groups)

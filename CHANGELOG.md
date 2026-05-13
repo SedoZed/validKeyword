@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.4] — 2026-05-13
+ 
+### Améliorations
+ 
+**Algorithme de similarité — dépluralisation token par token (`similarity.js`)**
+`depluralize()` s'applique désormais sur chaque token individuellement plutôt que sur la chaîne complète. "Valeurs sociales" / "Valeur sociale" est maintenant correctement classé comme "Singulier / pluriel" au lieu de "Variante orthographique".
+ 
+**Algorithme de similarité — exclusion des chiffres romains divergents (`similarity.js`)**
+Un check en début de `compare()` détecte les chiffres romains en majuscules dans les labels originaux (avant normalisation). Si les deux labels en contiennent un différent (ex. "XIXe siècle" / "XXe siècle"), la comparaison retourne `null` immédiatement, évitant les faux positifs historiques.
+ 
+**Algorithme de similarité — clustering par liens directs uniquement (`similarity.js`)**
+Le clustering Union-Find ne relie plus les concepts par transitivité aveugle. Un index des paires directement qualifiées est construit et utilisé pour filtrer les membres de chaque groupe : seuls les concepts ayant au moins un lien direct avec un autre membre sont conservés. Évite les faux clusters cross-thématiques.
+ 
+**Indicateurs de chargement (`index.html`, `main.css`)**
+Spinner `⠋ Connexion en cours…` sur le bouton "Enregistrer" de la modale Paramètres pendant `saveSettings()`. Spinner animé sur le bouton "⚡ Tout scanner" pendant les scans. Spinner inline sur les boutons "Fusionner →" pendant `executeClusterFusion`, restaurés en cas d'échec partiel. `loadBrowse()` wrappé dans un `setTimeout` pour laisser le navigateur peindre le spinner avant le freeze XHR.
+ 
+
 ## [0.1.3] — 2026-05-12
  
 ### Nouvelles fonctionnalités

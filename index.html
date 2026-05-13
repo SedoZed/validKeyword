@@ -110,6 +110,12 @@
 <!-- ── TOASTS ── -->
 <div id="toasts"></div>
 
+<!-- ── OVERLAY INIT ── -->
+<div id="initOverlay" class="init-overlay hidden">
+    <div class="spinner"></div>
+    <p id="initMsg">Connexion en cours…</p>
+</div>
+
 <!-- ── CONTENU ── -->
 <div class="container">
 
@@ -472,9 +478,16 @@ document.querySelectorAll('#settingsOverlay input').forEach(input => {
 document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
 
 async function saveSettings() {
-    const errEl = document.getElementById('cfgErrors');
+    const errEl  = document.getElementById('cfgErrors');
+    const saveBtn = document.getElementById('btnSaveSettings');
     errEl.classList.add('hidden');
     errEl.innerHTML = '';
+
+    // Feedback dans la modale pendant la connexion
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-sm"></span> Connexion en cours…';
+    // L'overlay plein écran n'est plus nécessaire si la modale est ouverte
+    document.getElementById('initOverlay').classList.add('hidden');
 
     const vals = {
         apiBase:      (document.getElementById('cfgApiBase').value || '').trim().replace(/\/$/, ''),
@@ -497,6 +510,8 @@ async function saveSettings() {
         errEl.innerHTML = `<strong>Champs obligatoires manquants :</strong>
             <ul>${missing.map(f => `<li>${f.label}</li>`).join('')}</ul>`;
         errEl.classList.remove('hidden');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Enregistrer';
         return;
     }
 
@@ -512,6 +527,8 @@ async function saveSettings() {
         document.getElementById('cfgKeyCred').classList.add('input-error');
         errEl.innerHTML = '<strong>Connexion échouée</strong> — vérifiez vos clés API.';
         errEl.classList.remove('hidden');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Enregistrer';
         return;
     }
 
@@ -519,6 +536,8 @@ async function saveSettings() {
     d3.select('#creator').text(a.user['o:name'] || a.user['o:email'] || '');
 
     await refreshScope();
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = 'Enregistrer';
     closeSettings();
     toast('Connecté', 'ok');
     buildAlphaBar();
@@ -758,7 +777,9 @@ async function scanAll() {
     if (!a) { toast("Configurez d'abord l'API", 'err'); openSettings(); return; }
 
     document.getElementById('introBanner').classList.add('hidden');
-    document.getElementById('btnScanAll').disabled = true;
+    const btnScan = document.getElementById('btnScanAll');
+    btnScan.disabled = true;
+    btnScan.innerHTML = '<span class="spinner-sm"></span> Scan en cours…';
     document.getElementById('scanProgress').classList.remove('hidden');
     document.getElementById('detectLoading').classList.remove('hidden');
     document.getElementById('pairsList').innerHTML = '';
@@ -786,7 +807,8 @@ async function scanAll() {
 
     document.getElementById('detectLoading').classList.add('hidden');
     document.getElementById('scanProgress').classList.add('hidden');
-    document.getElementById('btnScanAll').disabled = false;
+    btnScan.disabled = false;
+    btnScan.innerHTML = '⚡ Tout scanner';
     document.getElementById('scanStatus').textContent =
         `Scan complet — ${allConceptsG.length} concepts analysés → ` +
         `${clusters.length} groupe${clusters.length !== 1 ? 's' : ''} de doublons détecté${clusters.length !== 1 ? 's' : ''}.`;
@@ -1119,16 +1141,21 @@ async function directFuseCluster(clid) {
 
 // Exécute la fusion de tous les concepts non-conservés d'un cluster
 async function executeClusterFusion(clid, keepId, keepLabel, toMerge) {
+    // Feedback visuel sur les boutons de la carte
+    const card       = document.querySelector(`.pair-card[data-clid="${clid}"]`);
+    const fuseBtns   = card ? card.querySelectorAll('[data-action="fuse-quick"],[data-action="fuse-direct"]') : [];
+    fuseBtns.forEach(b => { b.disabled = true; b.innerHTML = '<span class="spinner-sm"></span>'; });
+
     let allOk = true;
     for (const src of toMerge) {
         const ok = await executeFusion(src['o:id'], keepId, getLabel(src), keepLabel);
         if (!ok) allOk = false;
     }
     if (allOk) {
-        const card = document.querySelector(`.pair-card[data-clid="${clid}"]`);
         if (card) { card.classList.add('fused'); setTimeout(() => { card.remove(); updateProgressCounter(); }, 320); }
         toast(`Groupe fusionné dans « ${keepLabel} » ✓`, 'ok');
     } else {
+        fuseBtns.forEach(b => { b.disabled = false; b.innerHTML = 'Fusionner →'; });
         toast('Fusion partielle — vérifiez le journal', 'err');
         markStaleConcepts();
     }
@@ -1351,38 +1378,37 @@ function loadBrowse() {
 
     const PAGE_SIZE = 30;
 
-    try {
-        if (allowedConceptIds !== null) {
-            // ── Mode restreint : pagination client ──────────────────────────
-            // Recharge les items filtrés si la query a changé ou si le cache est vide
-            if (!browseAllowedItems) {
+    setTimeout(() => {
+        try {
+            if (allowedConceptIds !== null) {
+                if (!browseAllowedItems) {
+                    const propTitleId = a.omk.getPropId('dcterms:title');
+                    let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
+                    if (browseQuery)
+                        query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
+                    const all = a.omk.getAllItems(query);
+                    browseAllowedItems = (Array.isArray(all) ? all : [])
+                        .filter(c => allowedConceptIds.has(c['o:id']));
+                }
+                const start   = (browsePage - 1) * PAGE_SIZE;
+                const items   = browseAllowedItems.slice(start, start + PAGE_SIZE);
+                const hasMore = start + PAGE_SIZE < browseAllowedItems.length;
+                document.getElementById('browseLoading').classList.add('hidden');
+                renderBrowseList(items, hasMore);
+            } else {
                 const propTitleId = a.omk.getPropId('dcterms:title');
                 let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
                 if (browseQuery)
                     query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
-                const all = a.omk.getAllItems(query);
-                browseAllowedItems = (Array.isArray(all) ? all : [])
-                    .filter(c => allowedConceptIds.has(c['o:id']));
+                const { items, hasMore } = a.omk.searchItemsPaginated(query, browsePage, PAGE_SIZE);
+                document.getElementById('browseLoading').classList.add('hidden');
+                renderBrowseList(items, hasMore);
             }
-            const start   = (browsePage - 1) * PAGE_SIZE;
-            const items   = browseAllowedItems.slice(start, start + PAGE_SIZE);
-            const hasMore = start + PAGE_SIZE < browseAllowedItems.length;
+        } catch (e) {
             document.getElementById('browseLoading').classList.add('hidden');
-            renderBrowseList(items, hasMore);
-        } else {
-            // ── Mode admin : pagination serveur (comportement d'origine) ────
-            const propTitleId = a.omk.getPropId('dcterms:title');
-            let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
-            if (browseQuery)
-                query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
-            const { items, hasMore } = a.omk.searchItemsPaginated(query, browsePage, PAGE_SIZE);
-            document.getElementById('browseLoading').classList.add('hidden');
-            renderBrowseList(items, hasMore);
+            toast('Erreur lors du chargement', 'err', e.message);
         }
-    } catch (e) {
-        document.getElementById('browseLoading').classList.add('hidden');
-        toast('Erreur lors du chargement', 'err', e.message);
-    }
+    }, 0);
 }
 
 // ──────────────────────────────────────────────
@@ -1708,3 +1734,6 @@ function toast(msg, type = 'info', detail = null) {
 }
 
 </script>
+
+</body>
+</html>
