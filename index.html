@@ -24,7 +24,7 @@
             <a class="app-dropdown-item" href="../validExpertises/index.html">
                 <span class="app-dropdown-dot"></span>✅ validExpertises
             </a>
-            <div class="app-dropdown-version">v0.1.3</div>
+            <div class="app-dropdown-version">v0.1.5</div>
         </div>
     </div>
     <div class="header-right">
@@ -110,10 +110,41 @@
 <!-- ── TOASTS ── -->
 <div id="toasts"></div>
 
-<!-- ── OVERLAY INIT ── -->
-<div id="initOverlay" class="init-overlay hidden">
-    <div class="spinner"></div>
-    <p id="initMsg">Connexion en cours…</p>
+<!-- ── MODALE AVERTISSEMENT RENOMMAGE ── -->
+<div class="overlay" id="renameWarningOverlay">
+    <div class="modal">
+        <h2>✏ Renommer un concept</h2>
+        <p style="font-size:.85rem;margin-bottom:.8rem">
+            Cette action modifie directement le concept dans Omeka S
+            (<code>o:title</code>, <code>skos:prefLabel</code>).
+            Elle est <strong>irréversible</strong> depuis cette interface.
+        </p>
+        <p style="font-size:.85rem;color:var(--muted);margin-bottom:1.2rem">
+            Vérifiez que le nouveau label est correct avant de valider.
+            En cas d'erreur, la correction devra être faite manuellement dans l'admin Omeka S.
+        </p>
+        <label class="rename-warn-check">
+            <input type="checkbox" id="renameWarnNeverShow" />
+            Ne plus afficher cet avertissement
+        </label>
+        <div class="modal-actions">
+            <button class="btn" id="renameWarnCancel">Annuler</button>
+            <button class="btn btn-primary" id="renameWarnContinue">Continuer</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── MODALE SUPPRESSION ── -->
+<div class="overlay" id="deleteOverlay">
+    <div class="modal">
+        <h2 id="deleteModalTitle">Supprimer un concept</h2>
+        <p id="deleteModalMsg" style="font-size:.85rem;margin-bottom:1rem"></p>
+        <div id="deleteModalEcList" class="delete-ec-list hidden"></div>
+        <div class="modal-actions">
+            <button class="btn" id="deleteCancelBtn">Annuler</button>
+            <button class="btn btn-danger" id="deleteConfirmBtn">Supprimer</button>
+        </div>
+    </div>
 </div>
 
 <!-- ── CONTENU ── -->
@@ -486,8 +517,6 @@ async function saveSettings() {
     // Feedback dans la modale pendant la connexion
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<span class="spinner-sm"></span> Connexion en cours…';
-    // L'overlay plein écran n'est plus nécessaire si la modale est ouverte
-    document.getElementById('initOverlay').classList.add('hidden');
 
     const vals = {
         apiBase:      (document.getElementById('cfgApiBase').value || '').trim().replace(/\/$/, ''),
@@ -909,9 +938,12 @@ function conceptItemHTML(c, clid, i) {
         : '';
     return `<label class="cluster-concept">
         <input type="radio" name="keep-${clid}" value="${c['o:id']}" data-label="${esc(label)}" ${i === 0 ? 'checked' : ''} />
-        <span class="cluster-concept-label">${esc(label)}</span>
+        <span class="cluster-concept-label" data-id="${c['o:id']}">${esc(label)}</span>
         <span class="ac-id">#${c['o:id']}</span>
         ${wdLink}
+        <button class="btn-rename-concept" data-action="rename-concept"
+                data-id="${c['o:id']}" data-label="${esc(label)}"
+                title="Renommer ce concept">✎</button>
         <button class="btn-remove-concept"
             data-action="remove-concept"
             data-clid="${clid}"
@@ -1245,7 +1277,53 @@ async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
         return false;
     }
 
-    // 3. Ajouter dcterms:replaces sur la cible (traçabilité — non bloquant)
+    // 3. Transférer les métadonnées de la source vers la cible (non bloquant)
+    // Propriétés mergées : isReferencedBy (Wikidata), altLabel, broader, narrower, related
+    try {
+        const srcItem = a.omk.getItem(srcId);
+        const tgtItem = a.omk.getItem(tgtId);
+        const MERGE_PROPS = [
+            'dcterms:isReferencedBy',
+            'skos:altLabel',
+            'skos:broader',
+            'skos:narrower',
+            'skos:related',
+        ];
+        let tgtModified = false;
+
+        for (const prop of MERGE_PROPS) {
+            const srcVals = srcItem[prop];
+            if (!srcVals?.length) continue;
+
+            const tgtVals  = tgtItem[prop] || [];
+
+            // Construit un Set des valeurs déjà présentes sur la cible
+            const existing = new Set(tgtVals.map(v =>
+                v['@id'] ?? v['@value'] ?? String(v.value_resource_id ?? '')
+            ));
+
+            const toAdd = srcVals.filter(v => {
+                const key = v['@id'] ?? v['@value'] ?? String(v.value_resource_id ?? '');
+                return key && !existing.has(key);
+            });
+
+            if (toAdd.length) {
+                tgtItem[prop] = [...tgtVals, ...toAdd];
+                tgtModified = true;
+                logFusion(`  ✓ ${prop} : ${toAdd.length} valeur(s) transférée(s)`, 'ok');
+            }
+        }
+
+        if (tgtModified) {
+            await a.omk.updateRessource(tgtId, null, 'items', tgtItem, 'PUT', tgtItem);
+            logFusion(`  ✓ Métadonnées mergées sur #${tgtId}`, 'ok');
+        }
+    } catch (e) {
+        logFusion(`  ✗ Merge métadonnées — ${e.message} (non bloquant)`, 'err');
+        // Non bloquant : la fusion continue même si le merge échoue
+    }
+
+    // 4. Ajouter dcterms:replaces sur la cible (traçabilité — non bloquant)
     try {
         await a.omk.updateRessource(tgtId, { 'dcterms:replaces': { rid: srcId } });
         logFusion(`  ✓ dcterms:replaces ajouté sur #${tgtId}`, 'ok');
@@ -1254,7 +1332,7 @@ async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
         // On continue quand même (non bloquant)
     }
 
-    // 4. Supprimer la source (seulement si tous les transferts ont réussi)
+    // 5. Supprimer la source (seulement si tous les transferts ont réussi)
     try {
         await a.omk.deleteItem({ 'o:id': srcId });
         logFusion(`  ✓ #${srcId} supprimé`, 'ok');
@@ -1370,6 +1448,374 @@ document.getElementById('btnBrowseNext').addEventListener('click', () => {
     if (!document.getElementById('btnBrowseNext').disabled) { browsePage++; loadBrowse(); }
 });
 
+// ──────────────────────────────────────────────
+// RENOMMAGE DE CONCEPT
+// ──────────────────────────────────────────────
+
+const RENAME_NEVER_WARN_KEY = 'cleanKeywords_rename_no_warn';
+let renameWarnShownThisSession = false;
+
+// Affiche la popup d'avertissement une fois par session (sauf si flag localStorage)
+function showRenameWarning(onContinue) {
+    if (localStorage.getItem(RENAME_NEVER_WARN_KEY) || renameWarnShownThisSession) {
+        onContinue();
+        return;
+    }
+    renameWarnShownThisSession = true;
+    document.getElementById('renameWarningOverlay').classList.add('open');
+    document.getElementById('renameWarnNeverShow').checked = false;
+
+    const cont = document.getElementById('renameWarnContinue');
+    const canc = document.getElementById('renameWarnCancel');
+    const close = (proceed) => {
+        if (document.getElementById('renameWarnNeverShow').checked)
+            localStorage.setItem(RENAME_NEVER_WARN_KEY, '1');
+        document.getElementById('renameWarningOverlay').classList.remove('open');
+        cont.replaceWith(cont.cloneNode(true)); // évite les double-listeners
+        canc.replaceWith(canc.cloneNode(true));
+        if (proceed) onContinue();
+    };
+    document.getElementById('renameWarnContinue').addEventListener('click', () => close(true));
+    document.getElementById('renameWarnCancel').addEventListener('click',   () => close(false));
+}
+
+// Lance l'édition inline sur un élément label
+function activateRenameInput(labelEl, conceptId, originalLabel) {
+    if (labelEl.querySelector('input')) return; // déjà en cours
+
+    const input = document.createElement('input');
+    input.type  = 'text';
+    input.value = originalLabel;
+    input.className = 'rename-input';
+    input.onclick = e => e.stopPropagation();
+
+    const originalHTML = labelEl.innerHTML;
+    labelEl.innerHTML = '';
+    labelEl.appendChild(input);
+
+    // Hint discret sous l'input
+    const hint = document.createElement('span');
+    hint.className   = 'rename-hint';
+    hint.textContent = 'Entrée pour valider · Échap pour annuler';
+    labelEl.appendChild(hint);
+
+    input.select();
+
+    const confirm = async () => {
+        const newLabel = input.value.trim();
+        if (!newLabel || newLabel === originalLabel) {
+            labelEl.innerHTML = originalHTML;
+            return;
+        }
+        input.disabled = true;
+        hint.remove();
+        const ok = await renameConceptInPlace(conceptId, newLabel, originalLabel);
+        if (ok) {
+            // Met à jour tous les endroits où ce label apparaît
+            labelEl.innerHTML = esc(newLabel);
+            document.querySelectorAll(`[data-id="${conceptId}"][data-label]`).forEach(el => {
+                el.dataset.label = newLabel;
+            });
+            document.querySelectorAll(`.cluster-concept-label[data-id="${conceptId}"]`).forEach(el => {
+                el.textContent = newLabel;
+            });
+            document.querySelectorAll(`input[type="radio"][value="${conceptId}"]`).forEach(el => {
+                el.dataset.label = newLabel;
+            });
+        } else {
+            labelEl.innerHTML = originalHTML;
+        }
+    };
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); confirm(); }
+        if (e.key === 'Escape') { labelEl.innerHTML = originalHTML; }
+    });
+}
+
+async function renameConceptInPlace(conceptId, newLabel, originalLabel = '') {
+    try {
+        const item = a.omk.getItem(conceptId);
+        if (!item) throw new Error('Concept introuvable');
+
+        // Met à jour toutes les propriétés de titre
+        item['o:title'] = newLabel;
+        if (item['skos:prefLabel']?.length)  item['skos:prefLabel'][0]['@value']  = newLabel;
+        if (item['dcterms:title']?.length)   item['dcterms:title'][0]['@value']   = newLabel;
+
+        await a.omk.updateRessource(conceptId, null, 'items', item, 'PUT', item);
+
+        // Met à jour le concept dans currentClusters et invalide le cache
+        currentClusters.forEach(cl => {
+            cl.concepts.forEach(c => {
+                if (c['o:id'] === conceptId) {
+                    c['o:title'] = newLabel;
+                    if (c['skos:prefLabel']?.length) c['skos:prefLabel'][0]['@value'] = newLabel;
+                    if (c['dcterms:title']?.length)  c['dcterms:title'][0]['@value']  = newLabel;
+                }
+            });
+        });
+        browseAllowedItems = null;
+        saveCache(currentClusters, null, null);
+
+        toastWithUndo(`Renommé en « ${newLabel} »`, conceptId, originalLabel, newLabel);
+        return true;
+    } catch (err) {
+        toast('Erreur lors du renommage — ' + (err.message || err), 'err');
+        return false;
+    }
+}
+
+// Délégation — bouton ✏ dans les clusters
+document.getElementById('pairsList').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action="rename-concept"]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const conceptId    = parseInt(btn.dataset.id);
+    const originalLabel = btn.dataset.label;
+    showRenameWarning(() => {
+        const labelEl = btn.closest('.cluster-concept')?.querySelector('.cluster-concept-label');
+        if (labelEl) activateRenameInput(labelEl, conceptId, originalLabel);
+    });
+});
+
+// ──────────────────────────────────────────────
+// SUPPRESSION INDIVIDUELLE DE CONCEPT
+// ──────────────────────────────────────────────
+
+function showDeleteConfirm(conceptId, label, rowEl) {
+    const overlay    = document.getElementById('deleteOverlay');
+    const titleEl    = document.getElementById('deleteModalTitle');
+    const msgEl      = document.getElementById('deleteModalMsg');
+    const ecListEl   = document.getElementById('deleteModalEcList');
+    const confirmBtn = document.getElementById('deleteConfirmBtn');
+    const cancelBtn  = document.getElementById('deleteCancelBtn');
+
+    titleEl.textContent = `Supprimer « ${label} »`;
+    msgEl.textContent   = 'Recherche des ECs liés…';
+    ecListEl.classList.add('hidden');
+    ecListEl.innerHTML  = '';
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Supprimer';
+    overlay.classList.add('open');
+
+    // Charge les ECs liés
+    setTimeout(() => {
+        try {
+            const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+            const seen = new Set();
+            const ecs  = [];
+            for (const prop of propList) {
+                const propId  = a.omk.getPropId(prop);
+                const results = a.omk.searchItems(
+                    `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${conceptId}&per_page=1000`
+                );
+                (Array.isArray(results) ? results : []).forEach(ec => {
+                    if (!seen.has(ec['o:id'])) { seen.add(ec['o:id']); ecs.push(ec); }
+                });
+            }
+
+            if (!ecs.length) {
+                msgEl.textContent = 'Aucun EC ne référence ce concept. La suppression est définitive.';
+            } else {
+                msgEl.textContent = `${ecs.length} EC${ecs.length > 1 ? 's référencent' : ' référence'} ce concept. La suppression retirera ce concept de leur liste d'expertises.`;
+                ecListEl.innerHTML = ecs.map(ec =>
+                    `<span class="delete-ec-item">${esc(getLabel(ec))} <span class="browse-id">#${ec['o:id']}</span></span>`
+                ).join('');
+                ecListEl.classList.remove('hidden');
+            }
+            confirmBtn.disabled = false;
+
+            // Listeners — clonés pour éviter les doublons
+            const newConfirm = confirmBtn.cloneNode(true);
+            const newCancel  = cancelBtn.cloneNode(true);
+            confirmBtn.replaceWith(newConfirm);
+            cancelBtn.replaceWith(newCancel);
+
+            newCancel.addEventListener('click',  () => overlay.classList.remove('open'));
+            newConfirm.addEventListener('click', async () => {
+                newConfirm.disabled = true;
+                newConfirm.innerHTML = '<span class="spinner-sm"></span>';
+                newCancel.disabled   = true;
+                overlay.classList.remove('open');
+                await deleteConceptWithCleanup(conceptId, label, ecs, rowEl);
+            });
+        } catch (e) {
+            msgEl.textContent = 'Erreur lors de la recherche des ECs liés.';
+            toast('Erreur : ' + (e.message || e), 'err');
+        }
+    }, 0);
+}
+
+async function deleteConceptWithCleanup(conceptId, label, ecs, rowEl) {
+    try {
+        // 1. Retire le concept des items EC
+        const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+        for (const ec of ecs) {
+            let modified = false;
+            for (const prop of propList) {
+                const before = (ec[prop] || []).length;
+                ec[prop] = (ec[prop] || []).filter(v => v.value_resource_id !== conceptId);
+                if (ec[prop].length !== before) modified = true;
+            }
+            if (modified) {
+                await a.omk.updateRessource(ec['o:id'], null, 'items', ec, 'PUT', ec);
+            }
+        }
+
+        // 2. Supprime le concept
+        await a.omk.deleteItem({ 'o:id': conceptId });
+
+        // 3. Met à jour l'UI
+        rowEl.style.opacity   = '0';
+        rowEl.style.transform = 'translateX(30px)';
+        rowEl.style.transition = 'opacity .3s, transform .3s';
+        setTimeout(() => rowEl.remove(), 320);
+
+        // Invalide le cache Browse et les clusters
+        browseAllowedItems = null;
+        deletedIds.add(conceptId);
+        localStorage.setItem(DELETED_KEY, JSON.stringify([...deletedIds]));
+        markStaleConcepts();
+
+        toast(`« ${label} » supprimé`, 'ok');
+    } catch (e) {
+        toast('Erreur lors de la suppression — ' + (e.message || e), 'err');
+    }
+}
+
+// Délégation — bouton 🗑 dans le Browse
+document.getElementById('browseList').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action="delete-browse"]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const conceptId = parseInt(btn.dataset.id);
+    const label     = btn.dataset.label;
+    const rowEl     = btn.closest('.browse-item');
+    showDeleteConfirm(conceptId, label, rowEl);
+});
+
+// Délégation — bouton ✎ dans le Browse
+document.getElementById('browseList').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action="rename-browse"]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const conceptId     = parseInt(btn.dataset.id);
+    const originalLabel = btn.dataset.label;
+    showRenameWarning(() => {
+        const nameEl = btn.closest('.browse-item')?.querySelector('.browse-item-name');
+        if (nameEl) activateRenameInput(nameEl, conceptId, originalLabel);
+    });
+});
+
+// Délégation — bouton ⇢ Fusionner dans le Browse
+document.getElementById('browseList').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action="merge-browse"]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const id    = btn.dataset.id;
+    const panel = document.getElementById(`merge-panel-${id}`);
+    const isOpen = !panel.classList.contains('hidden');
+
+    // Ferme tous les autres panneaux merge ouverts
+    document.querySelectorAll('.browse-merge-panel:not(.hidden)').forEach(p => {
+        p.classList.add('hidden');
+        p.querySelector('.merge-ac-input').value = '';
+        p.querySelector('.autocomplete-dropdown').classList.add('hidden');
+        p.querySelector('.merge-confirm-btn').classList.add('hidden');
+    });
+
+    if (!isOpen) {
+        panel.classList.remove('hidden');
+        const input = panel.querySelector('.merge-ac-input');
+        input.value = '';
+        panel.querySelector('.merge-confirm-btn').classList.add('hidden');
+        setupBrowseMergeAc(panel, parseInt(id), btn.dataset.label);
+        setTimeout(() => input.focus(), 50);
+    }
+});
+
+function setupBrowseMergeAc(panel, srcId, srcLabel) {
+    const input    = panel.querySelector('.merge-ac-input');
+    const dropdown = panel.querySelector('.merge-ac-dropdown');
+    const confirmBtn = panel.querySelector('.merge-confirm-btn');
+    const cancelBtn  = panel.querySelector('.merge-cancel-btn');
+    let selectedTarget = null;
+    let timer = null;
+
+    // Reset si on ré-ouvre
+    input.oninput = null;
+
+    input.addEventListener('input', function () {
+        clearTimeout(timer);
+        selectedTarget = null;
+        confirmBtn.classList.add('hidden');
+        const q = this.value.trim();
+        if (!q) { dropdown.classList.add('hidden'); return; }
+        timer = setTimeout(() => {
+            if (!a) return;
+            try {
+                const propTitleId = a.omk.getPropId('dcterms:title');
+                const items = a.omk.searchItems(
+                    `resource_class_id[]=${idClassKW}&property[0][property]=${propTitleId}` +
+                    `&property[0][type]=in&property[0][text]=${encodeURIComponent(q)}&per_page=12`
+                ).filter(i => i['o:id'] !== srcId); // exclut la source
+
+                if (!items.length) { dropdown.classList.add('hidden'); return; }
+                dropdown.innerHTML = items.map(item => {
+                    const label = getLabel(item);
+                    return `<div class="autocomplete-item" data-id="${item['o:id']}" data-label="${esc(label)}">
+                        <span>${esc(label)}</span><span class="ac-id">#${item['o:id']}</span>
+                    </div>`;
+                }).join('');
+                dropdown.querySelectorAll('.autocomplete-item').forEach(el => {
+                    el.addEventListener('mousedown', () => {
+                        selectedTarget = items.find(i => i['o:id'] == el.dataset.id);
+                        input.value = el.dataset.label;
+                        dropdown.classList.add('hidden');
+                        confirmBtn.textContent = `Fusionner dans « ${el.dataset.label} »`;
+                        confirmBtn.classList.remove('hidden');
+                    });
+                });
+                dropdown.classList.remove('hidden');
+            } catch (e) { /* ignore */ }
+        }, 280);
+    });
+
+    input.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
+
+    cancelBtn.onclick = () => {
+        panel.classList.add('hidden');
+        input.value = '';
+        confirmBtn.classList.add('hidden');
+        selectedTarget = null;
+    };
+
+    confirmBtn.onclick = async () => {
+        if (!selectedTarget) return;
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-sm"></span>';
+        cancelBtn.disabled   = true;
+
+        const ok = await executeFusion(
+            srcId, selectedTarget['o:id'],
+            srcLabel, getLabel(selectedTarget)
+        );
+        if (ok) {
+            const rowEl = panel.closest('.browse-item');
+            rowEl.style.opacity    = '0';
+            rowEl.style.transform  = 'translateX(-30px)';
+            rowEl.style.transition = 'opacity .3s, transform .3s';
+            setTimeout(() => rowEl.remove(), 320);
+            browseAllowedItems = null;
+        } else {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = `Fusionner dans « ${getLabel(selectedTarget)} »`;
+            cancelBtn.disabled = false;
+        }
+    };
+}
+
 function loadBrowse() {
     if (!a) return;
     document.getElementById('browseLoading').classList.remove('hidden');
@@ -1416,32 +1862,91 @@ function loadBrowse() {
 // Chargés à la demande au clic sur le nom du concept dans le Browse.
 // ──────────────────────────────────────────────
 
-function loadConceptEcs(conceptId, panelEl) {
+function loadConceptInfo(conceptId, item, panelEl) {
     panelEl.dataset.loaded = '1';
     panelEl.innerHTML = `<span class="browse-ec-loading">Chargement…</span>`;
-    try {
-        const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
-        const seen     = new Set();
-        const ecs      = [];
-        for (const prop of propList) {
-            const propId  = a.omk.getPropId(prop);
-            const results = a.omk.searchItems(
-                `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${conceptId}&per_page=1000`
-            );
-            (Array.isArray(results) ? results : []).forEach(ec => {
-                if (!seen.has(ec['o:id'])) { seen.add(ec['o:id']); ecs.push(ec); }
+
+    setTimeout(() => {
+        try {
+            // ── 1. Métadonnées ──────────────────────────────────────
+            const wdId      = extractWikidataId(item);
+            const createdAt = item['o:created']?.['@value']
+                ? new Date(item['o:created']['@value']).toLocaleDateString('fr-FR')
+                : '—';
+            const metaHTML = `
+                <div class="info-section">
+                    <div class="info-section-title">Métadonnées</div>
+                    <div class="info-meta-row">
+                        <span class="info-meta-label">Créé le</span>
+                        <span>${createdAt}</span>
+                    </div>
+                    ${wdId ? `<div class="info-meta-row">
+                        <span class="info-meta-label">Wikidata</span>
+                        <a href="https://www.wikidata.org/wiki/${wdId}" target="_blank"
+                           class="concept-wd-link">${wdId} ↗</a>
+                    </div>` : ''}
+                </div>`;
+
+            // ── 2. Concepts proches (depuis currentClusters) ────────
+            const nearPairs = [];
+            currentClusters.forEach(cl => {
+                cl.pairs.forEach(p => {
+                    const aId = p.a?.['o:id'] ?? p.aId;
+                    const bId = p.b?.['o:id'] ?? p.bId;
+                    if (aId === conceptId || bId === conceptId) {
+                        const otherId  = aId === conceptId ? bId : aId;
+                        const otherC   = cl.concepts.find(c => c['o:id'] === otherId);
+                        if (otherC) nearPairs.push({ label: getLabel(otherC), id: otherId, score: p.score, reason: p.reason });
+                    }
+                });
             });
+            nearPairs.sort((a, b) => b.score - a.score);
+            const nearHTML = `
+                <div class="info-section">
+                    <div class="info-section-title">Concepts proches</div>
+                    ${nearPairs.length
+                        ? nearPairs.map(p =>
+                            `<div class="info-near-item">
+                                <span class="info-near-label">${esc(p.label)}</span>
+                                <span class="ac-id">#${p.id}</span>
+                                <span class="info-near-score">${Math.round(p.score * 100)}%</span>
+                                <span class="info-near-reason">${p.reason}</span>
+                            </div>`).join('')
+                        : `<span class="browse-ec-empty">${currentClusters.length
+                            ? 'Aucun concept proche détecté.'
+                            : 'Lancez un scan pour voir les concepts proches.'}</span>`
+                    }
+                </div>`;
+
+            // ── 3. ECs liés (XHR) ────────────────────────────────────
+            const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
+            const seen = new Set(); const ecs = [];
+            for (const prop of propList) {
+                const propId  = a.omk.getPropId(prop);
+                const results = a.omk.searchItems(
+                    `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${conceptId}&per_page=1000`
+                );
+                (Array.isArray(results) ? results : []).forEach(ec => {
+                    if (!seen.has(ec['o:id'])) { seen.add(ec['o:id']); ecs.push(ec); }
+                });
+            }
+            const ecsHTML = `
+                <div class="info-section">
+                    <div class="info-section-title">ECs liés (${ecs.length})</div>
+                    ${ecs.length
+                        ? ecs.map(ec =>
+                            `<span class="browse-ec-item">${esc(getLabel(ec))}<span class="browse-id">#${ec['o:id']}</span></span>`
+                          ).join('')
+                        : `<span class="browse-ec-empty">Aucun EC rattaché à ce concept.</span>`
+                    }
+                </div>`;
+
+            panelEl.innerHTML = metaHTML + nearHTML + ecsHTML;
+
+        } catch (e) {
+            panelEl.innerHTML = `<span class="browse-ec-empty">Erreur lors du chargement.</span>`;
         }
-        if (!ecs.length) {
-            panelEl.innerHTML = `<span class="browse-ec-empty">Aucun EC rattaché à ce concept.</span>`;
-            return;
-        }
-        panelEl.innerHTML = ecs.map(ec =>
-            `<span class="browse-ec-item">${esc(getLabel(ec))}<span class="browse-id">#${ec['o:id']}</span></span>`
-        ).join('');
-    } catch (e) {
-        panelEl.innerHTML = `<span class="browse-ec-empty">Erreur lors du chargement.</span>`;
-    }
+    }, 0);
 }
 
 function renderBrowseList(items, hasMore) {
@@ -1493,10 +1998,27 @@ function renderBrowseList(items, hasMore) {
                 ${suggBadge}
                 ${wdBadge}
                 ${clBadge}
-                <button class="btn btn-sm btn-ghost" data-action="src" data-id="${id}" data-label="${esc(label)}">→ Source</button>
-                <button class="btn btn-sm btn-ghost" data-action="tgt" data-id="${id}" data-label="${esc(label)}">→ Cible</button>
+                <button class="btn btn-sm btn-ghost btn-rename-browse"
+                        data-action="rename-browse" data-id="${id}" data-label="${esc(label)}"
+                        title="Renommer ce concept">✎</button>
+                <button class="btn btn-sm btn-ghost btn-delete-browse"
+                        data-action="delete-browse" data-id="${id}" data-label="${esc(label)}"
+                        title="Supprimer ce concept">🗑</button>
+                <button class="btn btn-sm btn-ghost btn-merge-browse"
+                        data-action="merge-browse" data-id="${id}" data-label="${esc(label)}"
+                        title="Fusionner ce concept dans un autre">⇢</button>
             </div>
             <div class="browse-ec-panel hidden" id="ec-panel-${id}"></div>
+            <div class="browse-merge-panel hidden" id="merge-panel-${id}">
+                <span class="browse-merge-label">Fusionner dans :</span>
+                <div class="browse-merge-ac-wrap">
+                    <input type="text" class="merge-ac-input" placeholder="Rechercher un concept cible…"
+                           autocomplete="off" data-srcid="${id}" data-srclabel="${esc(label)}" />
+                    <div class="autocomplete-dropdown merge-ac-dropdown hidden"></div>
+                </div>
+                <button class="btn btn-sm merge-confirm-btn hidden">Confirmer</button>
+                <button class="btn btn-sm btn-ghost merge-cancel-btn">Annuler</button>
+            </div>
         </div>`;
     }).join('');
 
@@ -1513,7 +2035,10 @@ function renderBrowseList(items, hasMore) {
             } else {
                 panel.classList.remove('hidden');
                 toggle.textContent = '▼';
-                if (!panel.dataset.loaded) loadConceptEcs(id, panel);
+                if (!panel.dataset.loaded) {
+                    const item = items.find(i => i['o:id'] === id);
+                    loadConceptInfo(id, item, panel);
+                }
             }
         });
     });
@@ -1549,24 +2074,6 @@ function renderBrowseList(items, hasMore) {
                     setTimeout(() => card.style.outline = '', 1800);
                 }
             }
-        });
-    });
-
-    list.querySelectorAll('[data-action="src"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            stickyFusionSrc = items.find(i => i['o:id'] == btn.dataset.id);
-            document.getElementById('stickyFusionSrc').value = btn.dataset.label;
-            openStickyFusion();
-            toast(`Source définie : « ${btn.dataset.label} »`, 'ok');
-        });
-    });
-
-    list.querySelectorAll('[data-action="tgt"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            stickyFusionTgt = items.find(i => i['o:id'] == btn.dataset.id);
-            document.getElementById('stickyFusionTgt').value = btn.dataset.label;
-            openStickyFusion();
-            toast(`Cible définie : « ${btn.dataset.label} »`, 'ok');
         });
     });
 
@@ -1698,6 +2205,37 @@ function humanizeError(msg) {
 // Affiche un toast
 // type : 'ok' | 'err' | 'info'
 // detail : message technique optionnel (affiché via "détails ▾")
+// Toast avec bouton "Annuler" pour le renommage — reste 9s
+function toastWithUndo(msg, conceptId, originalLabel, newLabel) {
+    const c  = document.getElementById('toasts');
+    const el = document.createElement('div');
+    el.className = 'toast ok toast-undo';
+    el.innerHTML = `<span>${esc(msg)}</span>
+        <button class="toast-undo-btn">Annuler</button>`;
+    let undone = false;
+    el.querySelector('.toast-undo-btn').addEventListener('click', async () => {
+        if (undone) return;
+        undone = true;
+        el.remove();
+        // Restaure les labels dans l'UI avant même le PUT
+        document.querySelectorAll(`.cluster-concept-label[data-id="${conceptId}"]`).forEach(el2 => {
+            el2.textContent = originalLabel;
+        });
+        document.querySelectorAll(`[data-id="${conceptId}"][data-label]`).forEach(el2 => {
+            el2.dataset.label = originalLabel;
+        });
+        await renameConceptInPlace(conceptId, originalLabel, newLabel);
+    });
+    c.appendChild(el);
+    const timer = setTimeout(() => {
+        if (!undone) {
+            el.style.opacity = '0'; el.style.transform = 'translateX(40px)';
+            setTimeout(() => el.remove(), 320);
+        }
+    }, 9000);
+    el.querySelector('.toast-undo-btn').addEventListener('click', () => clearTimeout(timer));
+}
+
 function toast(msg, type = 'info', detail = null) {
     const c  = document.getElementById('toasts');
     const el = document.createElement('div');

@@ -555,6 +555,15 @@ header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
     border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto 1rem;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.spinner-sm {
+    display: inline-block; flex-shrink: 0;
+    width: 1rem; height: 1rem;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .75s linear infinite;
+    vertical-align: middle;
+}
 
 
 /* ── TOASTS ── */
@@ -682,3 +691,161 @@ header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
     font-style: italic;
     white-space: nowrap;
 }
+/* ── TAB À VALIDER ── */
+.validate-card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    border-left: 4px solid var(--danger);
+    padding: 1rem 1.1rem;
+    margin-bottom: .8rem;
+    transition: opacity .3s, transform .3s;
+}
+.validate-card.fused { opacity: 0; transform: translateX(-30px); }
+.validate-header {
+    display: flex; align-items: center; gap: .6rem;
+    margin-bottom: .7rem;
+}
+.validate-score { font-size: .85rem; font-weight: 600; color: var(--danger); }
+.validate-type  { font-size: .75rem; font-style: italic; color: var(--muted); }
+.validate-concepts { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .9rem; }
+.validate-concept {
+    display: flex; align-items: center; gap: .5rem;
+    font-size: .88rem; color: var(--text);
+}
+.validate-concept input[type="radio"] { flex-shrink: 0; cursor: pointer; }
+.validate-concept label { cursor: pointer; flex: 1; }
+.validate-actions {
+    display: flex; justify-content: flex-end; gap: .5rem;
+}
+.validate-intro {
+    text-align: center; padding: 3rem 1rem;
+    color: var(--muted); font-size: .9rem;
+}
+
+/* ── OVERLAY GÉNÉRIQUE (renommage) ── */
+.overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.45); z-index: 200;
+    align-items: center; justify-content: center;
+}
+.overlay.open { display: flex; }
+
+/* ── RENOMMAGE ── */
+.btn-rename-concept {
+    font-size: .7rem; padding: .1rem .3rem;
+    opacity: 0; transition: opacity .15s;
+    margin-left: .2rem; color: var(--muted);
+    background: none; border: none; cursor: pointer;
+}
+.cluster-concept:hover .btn-rename-concept { opacity: 1; }
+
+.btn-rename-browse {
+    font-size: .75rem; opacity: 0;
+    transition: opacity .15s;
+}
+.browse-item:hover .btn-rename-browse { opacity: 1; }
+
+.rename-input {
+    font-size: .88rem; padding: .2rem .4rem;
+    border: 1px solid var(--accent);
+    border-radius: 4px; outline: none;
+    width: 100%; max-width: 280px;
+    box-shadow: 0 0 0 2px rgba(52,152,219,.15);
+}
+
+.rename-warn-check {
+    display: flex; align-items: center; gap: .5rem;
+    font-size: .82rem; color: var(--text);
+    margin-bottom: 1.2rem; cursor: pointer;
+}
+.modal-actions {
+    display: flex; justify-content: flex-end; gap: .6rem;
+}
+
+.toast-undo { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+.toast-undo-btn {
+    background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.4);
+    color: #fff; font-size: .75rem; padding: .2rem .55rem;
+    border-radius: 4px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.toast-undo-btn:hover { background: rgba(255,255,255,.35); }
+
+.rename-hint {
+    display: block; font-size: .68rem; color: var(--muted);
+    margin-top: .2rem; font-style: italic;
+}
+
+/* ── SUPPRESSION ── */
+.btn-delete-browse {
+    font-size: .75rem; opacity: 0;
+    transition: opacity .15s; color: var(--danger);
+}
+.browse-item:hover .btn-delete-browse { opacity: .7; }
+.browse-item:hover .btn-delete-browse:hover { opacity: 1; }
+
+.delete-ec-list {
+    display: flex; flex-wrap: wrap; gap: .35rem;
+    margin-bottom: 1rem; padding: .5rem;
+    background: var(--color-background-secondary, #f5f5f5);
+    border-radius: 6px;
+}
+.delete-ec-item {
+    font-size: .78rem; padding: .15rem .45rem;
+    background: #fff; border: 0.5px solid var(--color-border-tertiary, #ddd);
+    border-radius: 4px; color: var(--text);
+}
+
+/* ── FUSION INLINE BROWSE ── */
+.btn-merge-browse {
+    font-size: .75rem; opacity: 0;
+    transition: opacity .15s; color: var(--primary);
+}
+.browse-item:hover .btn-merge-browse { opacity: .7; }
+.browse-item:hover .btn-merge-browse:hover { opacity: 1; }
+
+.browse-merge-panel {
+    width: 100%; padding: .55rem .2rem .2rem;
+    border-top: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+}
+.browse-merge-label { font-size: .78rem; color: var(--muted); flex-shrink: 0; }
+.browse-merge-ac-wrap { position: relative; flex: 1; min-width: 180px; }
+.merge-ac-input {
+    width: 100%; font-size: .82rem; padding: .25rem .5rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    outline: none; box-sizing: border-box;
+}
+.merge-ac-input:focus { border-color: var(--accent); }
+.merge-ac-dropdown {
+    position: absolute; top: calc(100% + 3px); left: 0; right: 0;
+    z-index: 50;
+}
+.merge-confirm-btn {
+    background: var(--primary); color: #fff;
+    border: none; font-size: .78rem;
+}
+.merge-confirm-btn:hover { opacity: .9; }
+
+/* ── PANNEAU INFO ── */
+.info-section {
+    width: 100%; margin-bottom: .6rem; padding-bottom: .5rem;
+    border-bottom: 0.5px solid var(--border);
+}
+.info-section:last-child { border-bottom: none; margin-bottom: 0; }
+.info-section-title {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); font-weight: 600; margin-bottom: .4rem;
+}
+.info-meta-row {
+    display: flex; gap: .5rem; align-items: baseline;
+    font-size: .78rem; margin-bottom: .2rem;
+}
+.info-meta-label { color: var(--muted); min-width: 70px; flex-shrink: 0; }
+.info-near-item {
+    display: flex; align-items: center; gap: .4rem;
+    font-size: .78rem; margin-bottom: .25rem; flex-wrap: wrap;
+}
+.info-near-label { color: var(--text); }
+.info-near-score { font-weight: 600; color: var(--danger); }
+.info-near-reason { font-style: italic; color: var(--muted); font-size: .72rem; }

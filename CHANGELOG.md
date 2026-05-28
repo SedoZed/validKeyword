@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.1.5] — 2026-05-28
+
+### Nouvelles fonctionnalités
+ 
+**Renommage de concept (`index.html`, `main.css`)**
+Bouton ✎ discret (visible au survol) sur chaque concept dans les clusters et dans le Browse. Au premier clic de la session, une popup d'avertissement informe que l'action modifie directement Omeka S (`o:title`, `skos:prefLabel`, `dcterms:title`). Une case "Ne plus afficher" persiste en `localStorage`. L'édition se fait via un champ `<input>` inline avec hint "Entrée pour valider · Échap pour annuler" — le blur ne valide pas (protection contre les validations accidentelles). Après renommage réussi, un toast vert "Renommé en « X »" reste 9 secondes avec un bouton "Annuler" permettant de restaurer l'ancien label via un PUT inverse.
+ 
+**Suppression individuelle de concept (`index.html`, `main.css`)**
+Bouton 🗑 discret (visible au survol) sur chaque ligne du Browse. Au clic, une modale liste les ECs liés (via `personPropExp`) avec leurs noms et une confirmation explicite. La suppression nettoie d'abord les références dans les items EC avant de supprimer le concept. Arrêt complet si le nettoyage échoue — la source n'est pas supprimée. La ligne disparaît avec animation après succès.
+ 
+**Fusion individuelle depuis le Browse (`index.html`, `main.css`)**
+Bouton ⇢ discret (visible au survol) sur chaque ligne du Browse. Au clic, un panneau inline s'ouvre sous la ligne avec un champ autocomplete pour chercher la cible. La source est exclue des suggestions. Une fois la cible sélectionnée, un bouton "Fusionner dans « X »" apparaît. La fusion utilise `executeFusion` existant. Fermeture par "Annuler" ou ouverture d'un autre panneau.
+ 
+**Panneau info enrichi dans le Browse (`index.html`, `main.css`)**
+Le clic sur le nom d'un concept dans le Browse ouvre désormais un panneau à 3 sections : métadonnées (date de création, lien QID Wikidata), concepts proches (filtrés depuis `currentClusters` — zéro requête API, triés par score), et ECs liés (chargés via XHR). Remplace l'ancien panneau ECs-uniquement.
+ 
+### Améliorations
+ 
+**Transfert de métadonnées lors d'une fusion (`index.html`)**
+`executeFusion` merge désormais les propriétés de la source vers la cible avant suppression : `dcterms:isReferencedBy` (QID Wikidata), `skos:altLabel`, `skos:broader`, `skos:narrower`, `skos:related`. Déduplication par valeur (`@id`, `@value`, `value_resource_id`). Non bloquant — la fusion continue même si le merge échoue.
+ 
+**Boutons Source/Cible supprimés du Browse (`index.html`)**
+Ces boutons pré-remplissaient la barre de fusion sticky depuis le Browse, un workflow peu intuitif. Remplacés par le bouton ⇢ de fusion directe. La barre sticky reste fonctionnelle depuis l'onglet Doublons.
+ 
+### Correctifs & nettoyage
+ 
+**Suppression de `#initOverlay` mort (`index.html`, `main.css`)**
+L'overlay plein écran "Connexion en cours…" était devenu inutile après le basculement du feedback dans la modale Paramètres. Le div HTML, le CSS `.init-overlay` et la référence JS orpheline ont été supprimés.
+ 
+**Listeners `src`/`tgt` orphelins retirés (`index.html`)**
+Les listeners sur `[data-action="src"]` et `[data-action="tgt"]` dans `renderBrowseList` ne trouvaient plus d'éléments depuis la suppression des boutons correspondants. Retirés pour garder le code propre.
+
 ## [0.1.4] — 2026-05-13
  
 ### Améliorations
