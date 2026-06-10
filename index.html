@@ -24,7 +24,7 @@
             <a class="app-dropdown-item" href="../validExpertises/index.html">
                 <span class="app-dropdown-dot"></span>✅ validExpertises
             </a>
-            <div class="app-dropdown-version">v0.1.5</div>
+            <div class="app-dropdown-version">v0.1.6</div>
         </div>
     </div>
     <div class="header-right">
@@ -67,6 +67,7 @@
             <div class="form-hint">Séparées par des virgules — utilisées lors de la fusion pour mettre à jour les ECs.</div>
         </div>
         <div class="modal-footer">
+            <button class="btn btn-ghost btn-sm" id="btnClearOmkCache" style="margin-right:auto;font-size:.75rem">Vider le cache</button>
             <button class="btn btn-ghost btn-sm" id="btnCloseSettings">Annuler</button>
             <button class="btn btn-primary" id="btnSaveSettings">Enregistrer</button>
         </div>
@@ -496,6 +497,11 @@ appSwitcher.addEventListener('click', e => {
 });
 document.addEventListener('click', () => appDropdown.classList.remove('app-dropdown--open'));
 document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
+document.getElementById('btnClearOmkCache').addEventListener('click', () => {
+    a?.omk?.clearMetadataCache();
+    toast('Cache des métadonnées vidé — rechargez la page pour appliquer', 'ok');
+    closeSettings();
+});
 
 // Efface l'erreur d'un champ dès que l'utilisateur le modifie
 document.querySelectorAll('#settingsOverlay input').forEach(input => {

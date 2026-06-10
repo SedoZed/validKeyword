@@ -22,12 +22,47 @@ export class omk {
         // INIT
         // ──────────────────────────────────────────────
 
+        const CACHE_KEY = 'omk_metadata_cache';
+        const CACHE_TTL = 24 * 60 * 60 * 1000; // 24h en ms
+
         this.init = function () {
+            // Tente de charger les métadonnées depuis le cache localStorage
+            try {
+                const cached = localStorage.getItem(CACHE_KEY);
+                if (cached) {
+                    const { ts, api, props, classes, rts } = JSON.parse(cached);
+                    // Cache valide si < 24h et pour la même API
+                    if (Date.now() - ts < CACHE_TTL && api === me.api) {
+                        me.props = props;
+                        me.class = classes;
+                        me.rts   = rts;
+                        return; // pas de requêtes réseau
+                    }
+                }
+            } catch (e) { /* cache corrompu — on recharge depuis l'API */ }
+
+            // Cache absent ou expiré : requêtes normales
             me.vocabs.forEach(v => {
                 me.getProps(v);
                 me.getClass(v);
             });
             me.getRT();
+
+            // Sauvegarde en cache
+            try {
+                localStorage.setItem(CACHE_KEY, JSON.stringify({
+                    ts:      Date.now(),
+                    api:     me.api,
+                    props:   me.props,
+                    classes: me.class,
+                    rts:     me.rts,
+                }));
+            } catch (e) { /* localStorage plein ou indisponible — pas grave */ }
+        }
+
+        // Vide le cache des métadonnées (à appeler depuis les Paramètres)
+        this.clearMetadataCache = function () {
+            localStorage.removeItem(CACHE_KEY);
         }
 
         this.getRT = function (cb = false) {
