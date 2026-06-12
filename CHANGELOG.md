@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.7] — 2026-06-12
+ 
+### Améliorations
+ 
+**Migration des requêtes réseau vers fetch async (`omk.js`, `index.html`)**
+Même migration que `validExpertises` v0.2.8 — `searchItems`, `getAllItems`, `searchItemsPaginated` et `getItem` passent en `fetch` asynchrone. L'UI reste réactive pendant les requêtes. Fonctions concernées : `loadBrowse`, `showDeleteConfirm`, `setupBrowseMergeAc`, `loadConceptInfo`, `setupStickyAc`, ainsi que tous les call sites dans `refreshScope`, `scanLetter`, `previewCluster`, `executeFusion`, `renameConceptInPlace`.
+ 
+**Protection anti-race-condition sur `setupStickyAc` (`index.html`)**
+Token `reqId` incrémenté à chaque frappe. Les réponses périmées sont ignorées. Spinner discret dans le dropdown pendant le chargement.
+ 
+**Sauvegarde des settings protégée (`index.html`)**
+`localStorage.setItem(STORAGE_KEY)` est maintenant dans un `try/catch`. En cas d'indisponibilité du `localStorage` (navigation privée, quota dépassé), un toast avertit l'utilisateur au lieu d'un échec silencieux.
+ 
+**Protection CORS explicite (`omk.js`)**
+`asyncRequest` détecte les erreurs réseau/CORS (`TypeError: Failed to fetch`) et lance une erreur avec un message explicite plutôt qu'un échec silencieux.
+ 
+### Correctifs
+ 
+**Déduplication des concepts lors d'une fusion (`index.html`)**
+Quand deux concepts fusionnés référencent le même EC, cet EC se retrouvait avec le concept en double dans ses propriétés. Désormais si le concept cible est déjà présent sur un EC, la source est simplement retirée sans ajout de doublon.
+
 ## [0.1.6] — 2026-06-10
 
 ### Nouvelles fonctionnalités

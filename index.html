@@ -24,7 +24,7 @@
             <a class="app-dropdown-item" href="../validExpertises/index.html">
                 <span class="app-dropdown-dot"></span>✅ validExpertises
             </a>
-            <div class="app-dropdown-version">v0.1.6</div>
+            <div class="app-dropdown-version">v0.1.7</div>
         </div>
     </div>
     <div class="header-right">
@@ -551,7 +551,11 @@ async function saveSettings() {
     }
 
     Object.assign(cfg, vals);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); }
+    catch (e) {
+        console.warn('Settings non sauvegardés (localStorage indisponible)');
+        toast('⚠ Paramètres non sauvegardés — vérifiez que vous n\'êtes pas en navigation privée', 'err');
+    }
 
     // Initialise la connexion Omeka S
     a = new auth({ mail: cfg.propMail, apiOmk: cfg.apiBase, ident: cfg.keyId, key: cfg.keyCred });
@@ -590,7 +594,7 @@ async function refreshScope() {
     d3.select('#scopeInfo').text('Calcul du périmètre…');
     try {
         // 1. Récupère les labos autorisés depuis l'item opérateur
-        const creator  = a.omk.getItem(cfg.creatorId);
+        const creator  = await a.omk.getItem(cfg.creatorId);
         const labVals  = creator['valo:responsableDe'] || [];
         const labIds   = labVals.filter(v => v.value_resource_id).map(v => parseInt(v.value_resource_id));
 
@@ -604,7 +608,7 @@ async function refreshScope() {
             const idClassPerson = a.omk.getClassByTerm('valo:EnseignantChercheur')['o:id'];
             let allEcs = [];
             for (const labId of labIds) {
-                const ecs = a.omk.searchItems(
+                const ecs = await a.omk.searchItems(
                     `resource_class_id[]=${idClassPerson}` +
                     `&property[0][property]=${isPartOfId}&property[0][type]=res&property[0][text]=${labId}` +
                     `&per_page=1000`
@@ -878,7 +882,7 @@ async function scanLetter(letter, silent = false) {
     let concepts = [];
     try {
         const propTitleId = a.omk.getPropId('dcterms:title');
-        const result = a.omk.searchItems(
+        const result = await a.omk.searchItems(
             `resource_class_id[]=${idClassKW}` +
             `&property[0][property]=${propTitleId}` +
             `&property[0][type]=sw` +
@@ -1117,14 +1121,14 @@ async function previewCluster(clid) {
             // Compte les ECs liés à ce concept source
             for (const prop of propList) {
                 const propId  = a.omk.getPropId(prop);
-                const results = a.omk.searchItems(
+                const results = await a.omk.searchItems(
                     `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${src['o:id']}&per_page=1000`
                 );
                 totalEc += Array.isArray(results) ? results.length : 0;
             }
             // Compte les Expertises liées à ce concept source
             const expPropId  = a.omk.getPropId('valo:expertise');
-            const expertises = a.omk.searchItems(
+            const expertises = await a.omk.searchItems(
                 `property[0][property]=${expPropId}&property[0][type]=res&property[0][text]=${src['o:id']}&per_page=1000`
             );
             totalExp += Array.isArray(expertises) ? expertises.length : 0;
@@ -1210,7 +1214,7 @@ async function executeClusterFusion(clid, keepId, keepLabel, toMerge) {
 async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
     // 0. Vérifie que le concept source existe toujours en BDD
     try {
-        const srcCheck = a.omk.getItem(srcId);
+        const srcCheck = await a.omk.getItem(srcId);
         if (!srcCheck || srcCheck['o:id'] !== srcId) {
             toast(`« ${srcLabel} » introuvable en BDD — fusion annulée`, 'err');
             logFusion(`✗ « ${srcLabel} » (#${srcId}) introuvable — déjà supprimé ?`, 'err');
@@ -1233,14 +1237,23 @@ async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
     for (const prop of propList) {
         try {
             const propId = a.omk.getPropId(prop);
-            const ecs    = a.omk.searchItems(
+            const ecs    = await a.omk.searchItems(
                 `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${srcId}&per_page=1000`
             );
             for (const ec of (Array.isArray(ecs) ? ecs : [])) {
                 try {
-                    const updated = (ec[prop] || []).map(v =>
-                        v.value_resource_id == srcId ? { ...v, value_resource_id: tgtId } : v
-                    );
+                    const currentVals = ec[prop] || [];
+                    const hasTgt = currentVals.some(v => v.value_resource_id == tgtId);
+                    let updated;
+                    if (hasTgt) {
+                        // La cible est déjà présente — on retire juste la source
+                        updated = currentVals.filter(v => v.value_resource_id != srcId);
+                    } else {
+                        // La cible est absente — on remplace la source par la cible
+                        updated = currentVals.map(v =>
+                            v.value_resource_id == srcId ? { ...v, value_resource_id: tgtId } : v
+                        );
+                    }
                     const dataOri = { ...ec, [prop]: updated };
                     await a.omk.updateRessource(ec['o:id'], null, 'items', dataOri, 'PUT', dataOri);
                     logFusion(`  ✓ EC #${ec['o:id']} mis à jour (${prop})`, 'ok');
@@ -1258,7 +1271,7 @@ async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
     // 2. Transférer les Expertises (pointe valo:expertise vers tgtId)
     try {
         const expertisePropId = a.omk.getPropId('valo:expertise');
-        const expertises = a.omk.searchItems(
+        const expertises = await a.omk.searchItems(
             `property[0][property]=${expertisePropId}&property[0][type]=res&property[0][text]=${srcId}&per_page=1000`
         );
         for (const exp of (Array.isArray(expertises) ? expertises : [])) {
@@ -1286,8 +1299,8 @@ async function executeFusion(srcId, tgtId, srcLabel, tgtLabel) {
     // 3. Transférer les métadonnées de la source vers la cible (non bloquant)
     // Propriétés mergées : isReferencedBy (Wikidata), altLabel, broader, narrower, related
     try {
-        const srcItem = a.omk.getItem(srcId);
-        const tgtItem = a.omk.getItem(tgtId);
+        const srcItem = await a.omk.getItem(srcId);
+        const tgtItem = await a.omk.getItem(tgtId);
         const MERGE_PROPS = [
             'dcterms:isReferencedBy',
             'skos:altLabel',
@@ -1541,7 +1554,7 @@ function activateRenameInput(labelEl, conceptId, originalLabel) {
 
 async function renameConceptInPlace(conceptId, newLabel, originalLabel = '') {
     try {
-        const item = a.omk.getItem(conceptId);
+        const item = await a.omk.getItem(conceptId);
         if (!item) throw new Error('Concept introuvable');
 
         // Met à jour toutes les propriétés de titre
@@ -1606,14 +1619,14 @@ function showDeleteConfirm(conceptId, label, rowEl) {
     overlay.classList.add('open');
 
     // Charge les ECs liés
-    setTimeout(() => {
+    setTimeout(async () => {
         try {
             const propList = cfg.personPropExp.split(',').map(p => p.trim()).filter(Boolean);
             const seen = new Set();
             const ecs  = [];
             for (const prop of propList) {
                 const propId  = a.omk.getPropId(prop);
-                const results = a.omk.searchItems(
+                const results = await a.omk.searchItems(
                     `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${conceptId}&per_page=1000`
                 );
                 (Array.isArray(results) ? results : []).forEach(ec => {
@@ -1758,14 +1771,14 @@ function setupBrowseMergeAc(panel, srcId, srcLabel) {
         confirmBtn.classList.add('hidden');
         const q = this.value.trim();
         if (!q) { dropdown.classList.add('hidden'); return; }
-        timer = setTimeout(() => {
+        timer = setTimeout(async () => {
             if (!a) return;
             try {
                 const propTitleId = a.omk.getPropId('dcterms:title');
-                const items = a.omk.searchItems(
+                const items = (await a.omk.searchItems(
                     `resource_class_id[]=${idClassKW}&property[0][property]=${propTitleId}` +
                     `&property[0][type]=in&property[0][text]=${encodeURIComponent(q)}&per_page=12`
-                ).filter(i => i['o:id'] !== srcId); // exclut la source
+                )).filter(i => i['o:id'] !== srcId); // exclut la source
 
                 if (!items.length) { dropdown.classList.add('hidden'); return; }
                 dropdown.innerHTML = items.map(item => {
@@ -1822,7 +1835,7 @@ function setupBrowseMergeAc(panel, srcId, srcLabel) {
     };
 }
 
-function loadBrowse() {
+async function loadBrowse() {
     if (!a) return;
     document.getElementById('browseLoading').classList.remove('hidden');
     document.getElementById('browseList').innerHTML = '';
@@ -1830,37 +1843,34 @@ function loadBrowse() {
 
     const PAGE_SIZE = 30;
 
-    setTimeout(() => {
-        try {
-            if (allowedConceptIds !== null) {
-                if (!browseAllowedItems) {
-                    const propTitleId = a.omk.getPropId('dcterms:title');
-                    let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
-                    if (browseQuery)
-                        query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
-                    const all = a.omk.getAllItems(query);
-                    browseAllowedItems = (Array.isArray(all) ? all : [])
-                        .filter(c => allowedConceptIds.has(c['o:id']));
-                }
-                const start   = (browsePage - 1) * PAGE_SIZE;
-                const items   = browseAllowedItems.slice(start, start + PAGE_SIZE);
-                const hasMore = start + PAGE_SIZE < browseAllowedItems.length;
-                document.getElementById('browseLoading').classList.add('hidden');
-                renderBrowseList(items, hasMore);
-            } else {
+    try {
+        if (allowedConceptIds !== null) {
+            if (!browseAllowedItems) {
                 const propTitleId = a.omk.getPropId('dcterms:title');
                 let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
                 if (browseQuery)
                     query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
-                const { items, hasMore } = a.omk.searchItemsPaginated(query, browsePage, PAGE_SIZE);
-                document.getElementById('browseLoading').classList.add('hidden');
-                renderBrowseList(items, hasMore);
+                const all = await a.omk.getAllItems(query);
+                browseAllowedItems = (Array.isArray(all) ? all : [])
+                    .filter(c => allowedConceptIds.has(c['o:id']));
             }
-        } catch (e) {
-            document.getElementById('browseLoading').classList.add('hidden');
-            toast('Erreur lors du chargement', 'err', e.message);
+            const start   = (browsePage - 1) * PAGE_SIZE;
+            const items   = browseAllowedItems.slice(start, start + PAGE_SIZE);
+            const hasMore = start + PAGE_SIZE < browseAllowedItems.length;
+            renderBrowseList(items, hasMore);
+        } else {
+            const propTitleId = a.omk.getPropId('dcterms:title');
+            let query = `resource_class_id[]=${idClassKW}&sort_by=${browseSort}&sort_order=asc`;
+            if (browseQuery)
+                query += `&property[0][property]=${propTitleId}&property[0][type]=in&property[0][text]=${encodeURIComponent(browseQuery)}`;
+            const { items, hasMore } = await a.omk.searchItemsPaginated(query, browsePage, PAGE_SIZE);
+            renderBrowseList(items, hasMore);
         }
-    }, 0);
+    } catch (e) {
+        toast('Erreur lors du chargement', 'err', e.message);
+    } finally {
+        document.getElementById('browseLoading').classList.add('hidden');
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -1872,7 +1882,7 @@ function loadConceptInfo(conceptId, item, panelEl) {
     panelEl.dataset.loaded = '1';
     panelEl.innerHTML = `<span class="browse-ec-loading">Chargement…</span>`;
 
-    setTimeout(() => {
+    setTimeout(async () => {
         try {
             // ── 1. Métadonnées ──────────────────────────────────────
             const wdId      = extractWikidataId(item);
@@ -1929,7 +1939,7 @@ function loadConceptInfo(conceptId, item, panelEl) {
             const seen = new Set(); const ecs = [];
             for (const prop of propList) {
                 const propId  = a.omk.getPropId(prop);
-                const results = a.omk.searchItems(
+                const results = await a.omk.searchItems(
                     `property[0][property]=${propId}&property[0][type]=res&property[0][text]=${conceptId}&per_page=1000`
                 );
                 (Array.isArray(results) ? results : []).forEach(ec => {
@@ -2113,20 +2123,25 @@ setupStickyAc('stickyFusionTgt', 'stickyTgtDropdown', item => { stickyFusionTgt 
 
 function setupStickyAc(inputId, dropdownId, onSelect) {
     let timer = null;
+    let reqId = 0;
     const input    = document.getElementById(inputId);
     const dropdown = document.getElementById(dropdownId);
     input.addEventListener('input', function () {
         clearTimeout(timer);
         const q = this.value.trim();
         if (!q) { dropdown.classList.add('hidden'); return; }
-        timer = setTimeout(() => {
+        dropdown.innerHTML = `<div class="ac-loading"><span class="spinner-sm"></span></div>`;
+        dropdown.classList.remove('hidden');
+        timer = setTimeout(async () => {
+            const id = ++reqId;
             if (!a) return;
             try {
                 const propTitleId = a.omk.getPropId('dcterms:title');
-                const items = a.omk.searchItems(
+                const items = await a.omk.searchItems(
                     `resource_class_id[]=${idClassKW}&property[0][property]=${propTitleId}` +
                     `&property[0][type]=in&property[0][text]=${encodeURIComponent(q)}&per_page=12`
                 );
+                if (id !== reqId) return;
                 if (!items.length) { dropdown.classList.add('hidden'); return; }
                 dropdown.innerHTML = items.map(item => {
                     const label = getLabel(item);
@@ -2143,7 +2158,9 @@ function setupStickyAc(inputId, dropdownId, onSelect) {
                     });
                 });
                 dropdown.classList.remove('hidden');
-            } catch (e) { /* ignore les erreurs d'autocomplete */ }
+            } catch (e) {
+                if (id === reqId) dropdown.classList.add('hidden');
+            }
         }, 280);
     });
     input.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));

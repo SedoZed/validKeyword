@@ -199,37 +199,37 @@ export class omk {
         // RECHERCHE
         // ──────────────────────────────────────────────
 
-        this.searchItems = function (query, cb = false) {
+        this.searchItems = async function (query, cb = false) {
             let url = me.api + 'items?' + query,
-                rs  = syncRequest(url);
+                rs  = await asyncRequest(url);
             if (cb) cb(rs);
             return rs;
         }
 
-        this.searchItemsPaginated = function (query, page = 1, perPage = 20) {
-            const url     = me.api + 'items?' + query + '&page=' + page + '&per_page=' + perPage;
-            const request = new XMLHttpRequest();
-            request.open('GET', url, false);
-            request.send(null);
-            if (request.status === 200) {
-                const items   = JSON.parse(request.response);
-                // X-Total-Results inaccessible en cross-origin :
-                // on déduit s'il y a une page suivante depuis le nombre d'items reçus
-                const hasMore = items.length === perPage;
-                return { items, hasMore };
-            }
-            return { items: [], hasMore: false };
+        this.searchItemsPaginated = async function (query, page = 1, perPage = 20) {
+            const url   = me.api + 'items?' + query + '&page=' + page + '&per_page=' + perPage;
+            const items = await asyncRequest(url) || [];
+            // X-Total-Results inaccessible en cross-origin :
+            // on déduit s'il y a une page suivante depuis le nombre d'items reçus
+            const hasMore = items.length === perPage;
+            return { items, hasMore };
         }
 
-        this.getAllItems = function (query, cb = false) {
+        this.getAllItems = async function (query, cb = false) {
             let url = me.api + 'items?per_page=' + perPage + '&' + query + '&page=',
-                fin = false, rs = [], data, page = 1;
+                fin = false, rs = [], page = 1;
             while (!fin) {
-                data = syncRequest(url + page);
-                fin  = data.length ? false : true;
-                rs   = rs.concat(data);
-                page++;
+                const data = await asyncRequest(url + page);
+                if (!data || !data.length) { fin = true; }
+                else { rs = rs.concat(data); page++; }
             }
+            if (cb) cb(rs);
+            return rs;
+        }
+
+        this.getItem = async function (id, cb = false) {
+            let url = me.api + 'items/' + id,
+                rs  = await asyncRequest(url);
             if (cb) cb(rs);
             return rs;
         }
@@ -435,6 +435,25 @@ export class omk {
             request.send(null);
             if (request.status === 200) {
                 return JSON.parse(request.response);
+            }
+        }
+
+        async function asyncRequest(q) {
+            try {
+                const response = await fetch(q, {
+                    method:         'GET',
+                    mode:           'cors',
+                    cache:          'no-cache',
+                    credentials:    'same-origin',
+                    referrerPolicy: 'no-referrer',
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status} — ${q}`);
+                return response.json();
+            } catch (e) {
+                if (e instanceof TypeError && e.message.includes('fetch')) {
+                    throw new Error('Erreur réseau ou CORS — vérifiez la connexion et l\'URL de l\'API');
+                }
+                throw e;
             }
         }
 
