@@ -22,19 +22,47 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ──────────────────────────────────────────────────────────────────────
+   Palette — charte graphique de l'Université Paris 8, accordée à ValoVizu.
+   Jeu de jetons rigoureusement identique à celui de validExpertises : les
+   deux applications partagent ce bloc, il doit rester synchronisé.
+
+   Les noms sont conservés, seules les valeurs changent — les appels à var()
+   de cette feuille restent intacts. Le nom employé par ValoVizu figure en
+   regard pour que la correspondance reste lisible des deux côtés.
+
+   Le vert et l'ambre ne viennent pas de la charte, qui n'en contient aucun :
+   ils portent l'opposition « fait » / « à faire ». Ils étaient déjà écrits en
+   dur dans cette feuille ; les voici promus en jetons.
+
+   Contrastes mesurés sur blanc, seuil AA à 4.5 — Raspberry 6.94, Poppy 4.83,
+   Maroon 11.15, vert 6.49, ambre 7.09. Les quatre valeurs remplacées
+   échouaient toutes : accent 3.15, danger 3.82, success 2.10, warn 2.19.
+   ────────────────────────────────────────────────────────────────────── */
 :root {
-    --primary:  #2c3e50;
-    --accent:   #3498db;
-    --danger:   #e74c3c;
-    --success:  #2ecc71;
-    --warn:     #f39c12;
-    --neutral:  #95a5a6;
-    --bg:       #f5f6fa;
-    --card-bg:  #ffffff;
-    --text:     #2c3e50;
-    --muted:    #7f8c8d;
-    --border:   #dfe6e9;
-    --shadow:   0 2px 8px rgba(0,0,0,.1);
+    --primary:  #75151F;   /* Maroon     → --barre-fond */
+    --accent:   #AE164E;   /* Raspberry  → --signal     */
+    --danger:   #E30F1B;   /* Poppy      → --alerte     */
+    --success:  #1B6B45;   /* hors charte : état « fait »    */
+    --warn:     #92400E;   /* hors charte : état « à faire » */
+    --neutral:  #877C83;   /*            → --encre-3    */
+    --bg:       #F7F4F5;   /*            → --papier     */
+    --card-bg:  #FFFFFF;   /*            → --carte      */
+    --text:     #1A1418;   /*            → --encre      */
+    --muted:    #5B5058;   /*            → --encre-2    */
+    --border:   #E2D8DC;   /*            → --filet      */
+    --shadow:   0 1px 2px rgba(20,35,43,.10);  /* → --ombre-carte */
+
+    /* Jetons de ValoVizu encore inemployés ici. Posés dès maintenant : ils ne
+       changent rien à l'affichage et préparent un éventuel thème sombre. */
+    --signal-2:     #FAE7ED;
+    --alerte-2:     #FDE9EA;
+    --filet-doux:   #EFE8EB;
+    --barre-texte:  #FFFFFF;
+    --barre-doux:   rgba(255,255,255,.62);
+    --barre-filet:  rgba(255,255,255,.35);
+    --barre-survol: #8F2029;
+    --ombre-modale: 0 12px 40px rgba(22,35,43,.25);
 }
 
 body {
@@ -51,30 +79,94 @@ body {
 
 /* ── HEADER ── */
 
+/* ──────────────────────────────────────────────────────────────────────
+   Bandeau — aligné sur celui de ValoVizu.
+
+   Celui de ValoVizu est clair, pas coloré : `--barre-fond` y habille la barre
+   de légende, en dessous. Passer d'une barre sombre à une barre claire est ce
+   qui rend les deux outils reconnaissables comme une même suite ; rien n'y
+   change de place, seules les couleurs et la typographie bougent.
+
+   Le filigrane « & » du bandeau de ValoVizu n'est pas repris : il demande
+   `overflow: hidden` sur l'en-tête, ce qui écrêterait le menu déroulant, dont
+   le panneau est positionné en absolu à l'intérieur. C'est la panne que
+   ValoVizu avait elle-même rencontrée avant de sortir son panneau du bandeau.
+   ────────────────────────────────────────────────────────────────────── */
 header {
-    background: var(--primary);
-    color: #fff;
-    padding: .9rem 1.4rem;
+    background: var(--card-bg);
+    color: var(--text);
+    /* Contenu centré sur 960 px pour s'aligner sur le `.container` en dessous.
+       Obtenu par le rembourrage plutôt que par un élément d'habillage, pour ne
+       pas toucher à la structure du balisage. */
+    position: relative;
+    padding: 1rem max(1.4rem, calc((100% - 960px) / 2));
+    /* Le bouton des outils étant sorti du flux, le rembourrage gauche lui
+       réserve sa place : jamais moins de 86 px, soit 24 de marge, 34 de bouton
+       et 28 d'écart — les mêmes valeurs que chez ValoVizu, pour que le titre
+       démarre au même endroit dans les deux outils lorsque la fenêtre est
+       trop étroite pour que le centrage s'applique. */
+    padding-left: max(86px, calc((100% - 960px) / 2));
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    border-bottom: 1px solid var(--border);
 }
-header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
-.header-right { display: flex; align-items: center; gap: .8rem; font-size: .8rem; opacity: .85; }
-#creator      { font-weight: 600; }
 
-/* ── APP SWITCHER ── */
-.app-switcher {
-    position: relative; display: flex; align-items: center; gap: .5rem;
-    cursor: pointer; user-select: none;
-    padding: .2rem .4rem; border-radius: 6px;
-    transition: background .15s;
+/* Ancré au bord gauche du bandeau, et non au début du bloc centré : les trois
+   applications n'ayant pas la même largeur de contenu, un bouton centré avec
+   le contenu se déplaçait de près de deux cents pixels au passage de l'une à
+   l'autre. La zone occupe toute la hauteur du bandeau, de sorte que le panneau
+   du menu, positionné à `100%`, tombe juste sous le bandeau. */
+/* Ancré par le haut et non centré : les bandeaux des trois outils n'ont pas la
+   même hauteur — celui de ValoVizu grandit sous 1100 px quand ses onglets
+   reviennent à la ligne — et un bouton centré se décalerait d'autant. Posé à
+   18 px du haut, il tombe au même pixel partout. La zone garde toute la
+   hauteur du bandeau pour que le panneau du menu, calé sur `100%`, s'ouvre
+   bien en dessous et non à l'intérieur. */
+.toolbox { position: absolute; left: 24px; top: 0; bottom: 0; display: flex; align-items: flex-start; padding-top: 18px; }
+.toolbox-btn {
+    display: flex; flex-direction: column; justify-content: center; gap: 3.5px;
+    width: 34px; height: 34px; padding: 0 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card-bg); cursor: pointer;
+    transition: border-color .15s;
 }
-.app-switcher:hover { background: rgba(255,255,255,.12); }
-.app-switcher-icon { display: flex; flex-direction: column; gap: 3.5px; width: 16px; flex-shrink: 0; }
-.app-switcher-icon span { display: block; height: 1.5px; background: rgba(255,255,255,.8); border-radius: 2px; }
+.toolbox-btn span { display: block; height: 1.5px; background: var(--neutral); border-radius: 2px; transition: background .15s; }
+.toolbox-btn:hover      { border-color: var(--accent); }
+.toolbox-btn:hover span { background: var(--accent); }
+.toolbox-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Signature de l'établissement, reprise telle quelle de ValoVizu : chasse
+   fixe, capitales espacées, dans la couleur d'interaction. */
+.surtitre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 3px; font-weight: 500;
+}
+header h1     { font-size: 25px; font-weight: 600; line-height: 1.15; letter-spacing: -.01em; }
+.header-right { display: flex; align-items: center; gap: .8rem; font-size: .8rem; color: var(--muted); }
+#creator      { font-weight: 600; color: var(--text); }
+
+/* ── MENU DES OUTILS ──
+   Les règles `.app-switcher*` ont disparu avec la structure qu'elles
+   habillaient : l'icône n'est plus dans le titre, c'est `.toolbox` qui porte
+   désormais le bouton, plus haut dans cette feuille. */
+
+/* Le bandeau débordait déjà en dessous de 480 px avant ce travail ; le titre
+   agrandi et la signature ajoutée abaissaient ce seuil à 560 px. Plutôt que
+   de laisser le contenu sortir du cadre, on autorise le retour à la ligne et
+   on rend au titre sa taille d'origine. La signature s'efface en dernier :
+   c'est l'élément le plus sacrifiable d'un en-tête à l'étroit. */
+@media (max-width: 760px) {
+    header        { flex-wrap: wrap; padding: .75rem 1rem; row-gap: .5rem; }
+    header h1     { font-size: 1.15rem; }
+    .surtitre     { font-size: 10px; letter-spacing: .1em; }
+    .header-right { flex-wrap: wrap; }
+}
+@media (max-width: 520px) {
+    .surtitre { display: none; }
+}
 .app-dropdown {
     display: none; position: absolute; top: calc(100% + 8px); left: 0;
     background: #fff; border-radius: 8px;
@@ -94,9 +186,12 @@ header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
     text-decoration: none; cursor: pointer; transition: background .12s;
 }
 .app-dropdown-item:hover { background: #f3f4f6; }
-.app-dropdown-item--active { background: #f0faf5; color: #1b6b45; font-weight: 500; pointer-events: none; }
+/* Mêmes valeurs que dans validExpertises : le menu est l'élément que les trois
+   outils ont en commun, il ne doit pas se présenter différemment de l'un à
+   l'autre. Le vert tenait de l'ancienne identité de cette application seule. */
+.app-dropdown-item--active { background: var(--filet-doux); color: var(--text); font-weight: 500; pointer-events: none; }
 .app-dropdown-dot { width: 7px; height: 7px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
-.app-dropdown-item--active .app-dropdown-dot { background: #1b6b45; }
+.app-dropdown-item--active .app-dropdown-dot { background: var(--accent); }
 .app-dropdown-version {
     font-size: .7rem; color: #bbb;
     padding: .3rem .85rem .5rem;
@@ -249,7 +344,9 @@ header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
     transition: background .15s, color .15s, box-shadow .15s;
 }
 .alpha-btn:hover  { background: var(--accent); color: #fff; border-color: var(--accent); }
-.alpha-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 2px 6px rgba(52,152,219,.35); }
+/* Le halo reprenait l'ancien bleu #3498db écrit en rgba : avec Raspberry, le
+   bouton rouge se retrouvait auréolé de bleu. Il suit désormais le jeton. */
+.alpha-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 35%, transparent); }
 .alpha-btn.done   { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); border-color: var(--success); }
 
 .scan-all-bar {
@@ -787,12 +884,16 @@ header h1     { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
 .delete-ec-list {
     display: flex; flex-wrap: wrap; gap: .35rem;
     margin-bottom: 1rem; padding: .5rem;
-    background: var(--color-background-secondary, #f5f5f5);
+    /* `--color-background-secondary` et `--color-border-tertiary` n'ont jamais
+       existé dans cette feuille : ces deux règles tombaient toujours sur leur
+       valeur de repli, deux gris neutres restés hors du système. Rattachées
+       aux jetons réels, elles suivent maintenant la charte. */
+    background: var(--bg);
     border-radius: 6px;
 }
 .delete-ec-item {
     font-size: .78rem; padding: .15rem .45rem;
-    background: #fff; border: 0.5px solid var(--color-border-tertiary, #ddd);
+    background: var(--card-bg); border: 0.5px solid var(--border);
     border-radius: 4px; color: var(--text);
 }
 

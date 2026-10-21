@@ -5,17 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>cleanKeywords — Nettoyage des mots-clefs</title>
     <script src="assets/js/d3.min.js"></script>
-    <link rel="stylesheet" href="assets/main.css" />
+    <link rel="stylesheet" href="assets/main.css?v=0.2.0" />
 </head>
 <body>
 
 <!-- ── HEADER ── -->
 <header>
-    <div class="app-switcher" id="appSwitcher">
-        <div class="app-switcher-icon" aria-hidden="true">
-            <span></span><span></span><span></span>
-        </div>
-        <h1>🧹 cleanKeywords</h1>
+    <!-- Le bouton des outils est détaché du titre et ancré au bord gauche du
+         bandeau : il se trouve ainsi au même endroit de l'écran dans les trois
+         applications de la suite, qui n'ont pas la même largeur de contenu.
+         Le titre n'ouvre donc plus le menu — seul ce bouton le fait, comme
+         chez ValoVizu. L'identifiant est conservé : le script est inchangé. -->
+    <div class="toolbox">
+        <button class="toolbox-btn" id="appSwitcher" type="button"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Autres outils" title="Autres outils">
+            <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+        </button>
         <div class="app-dropdown" id="appDropdown">
             <div class="app-dropdown-header">Outils</div>
             <div class="app-dropdown-item app-dropdown-item--active">
@@ -24,14 +30,25 @@
             <a class="app-dropdown-item" href="../validExpertises/index.html">
                 <span class="app-dropdown-dot"></span>✅ validExpertises
             </a>
-            <div class="app-dropdown-version">v0.1.7</div>
+            <a class="app-dropdown-item" href="../valoVizu/index.html">
+                <span class="app-dropdown-dot"></span>📊 ValoVizu
+            </a>
+            <div class="app-dropdown-version">v0.2.0</div>
         </div>
+    </div>
+    <div class="header-title">
+        <p class="surtitre">Université&nbsp;Paris&nbsp;8 · Université des Créations</p>
+        <h1>🧹 cleanKeywords</h1>
     </div>
     <div class="header-right">
         <span id="scopeInfo" class="scope-info"></span>
-        <button class="btn btn-sm btn-ghost" id="btnRefreshScope" title="Recalculer le périmètre" style="color:#fff;border-color:rgba(255,255,255,.3);display:none">🔄</button>
+        <!-- Les couleurs en ligne forçaient du blanc pour tenir sur la barre
+             sombre ; sur fond clair elles rendraient ces boutons invisibles.
+             `.btn-ghost` convient tel quel. `display:none` est conservé : il
+             porte l'état initial du bouton, que le script bascule ensuite. -->
+        <button class="btn btn-sm btn-ghost" id="btnRefreshScope" title="Recalculer le périmètre" style="display:none">🔄</button>
         <span id="creator"></span>
-        <button class="btn btn-sm btn-ghost" id="btnOpenSettings" style="color:#fff;border-color:rgba(255,255,255,.3)">⚙ Paramètres</button>
+        <button class="btn btn-sm btn-ghost" id="btnOpenSettings">⚙ Paramètres</button>
     </div>
 </header>
 

@@ -1,23 +1,132 @@
 # Changelog
 
+## [0.2.0] — 2026-10-20
+
+### Modifié
+
+**Bandeau aligné sur celui de ValoVizu (`index.html`, `main.css`)**
+Le bandeau passe du Maroon au blanc, avec un filet clair en bas. C'est le
+bandeau réel de ValoVizu : chez lui, `--barre-fond` habille la barre de
+légende, en dessous, et non l'en-tête. La barre sombre était ce qui empêchait
+les deux outils de se lire comme une même suite.
+
+La signature de l'établissement — « Université Paris 8 · Université des
+Créations », en chasse fixe et capitales espacées — surmonte désormais le titre,
+dont la taille passe de 1,1 à 1,45 rem. Le contenu du bandeau est centré sur
+960 px pour s'aligner sur le `.container` en dessous, par le rembourrage plutôt
+que par un élément d'habillage supplémentaire.
+
+**Le bouton des outils est détaché du titre et ancré au bord gauche**, dans un
+carré bordé dont le cadre et les barres passent au Raspberry au survol. Sur
+fond clair, trois traits nus ne se lisent pas comme un bouton.
+
+Il est posé à 24 px du bord et 18 px du haut, les mêmes valeurs que dans
+ValoVizu : d'un outil à l'autre, il tombe désormais au même pixel, quelle que
+soit la largeur de la fenêtre. Chaque application centrant son en-tête sur la
+largeur de son propre contenu — 960 px ici, 1440 chez ValoVizu — un bouton
+solidaire du bloc centré se déplaçait de près de deux cents pixels au passage
+de l'une à l'autre.
+
+**Conséquence à connaître : le titre n'ouvre plus le menu.** Seul le bouton le
+fait, comme chez ValoVizu. Le script est inchangé : l'identifiant `appSwitcher`
+a suivi le bouton.
+
+**L'entrée courante du menu reprend les valeurs de validExpertises (`main.css`)**
+Elle était teintée de vert, reste de l'identité propre à cette application. Le
+menu est l'élément que les trois outils ont en commun ; il ne doit pas se
+présenter différemment de l'un à l'autre.
+
+### Corrigé
+
+**Deux boutons rendus invisibles par des couleurs en ligne (`index.html`)**
+« Paramètres » et le bouton de recalcul du périmètre portaient
+`color:#fff;border-color:rgba(255,255,255,.3)` directement dans le balisage,
+pour tenir sur la barre sombre. Sur fond clair ils auraient disparu. Les
+couleurs sont retirées ; `.btn-ghost` convient tel quel, puisqu'il est déjà
+défini en sombre sur clair. Le `display:none` du second est conservé : il porte
+son état initial, que le script bascule ensuite.
+
+**Débordement du bandeau sur écran étroit (`main.css`)**
+Il débordait déjà en dessous de 480 px avant ce travail ; le titre agrandi et la
+signature ajoutée abaissaient ce seuil à 560 px. Le bandeau autorise désormais
+le retour à la ligne, le titre retrouve sa taille d'origine sous 760 px et la
+signature s'efface sous 520 px. Plus aucun débordement de 1920 à 390 px — y
+compris celui qui préexistait.
+
+**Note technique** — le filigrane « & » du bandeau de ValoVizu n'est pas repris.
+Il demande `overflow: hidden` sur l'en-tête, ce qui écrêterait le panneau du
+menu déroulant, positionné en absolu à l'intérieur. C'est la panne que ValoVizu
+avait elle-même rencontrée avant de sortir son panneau du bandeau.
+
+## [0.1.9] — 2026-10-20
+
+### Modifié
+
+**Palette alignée sur la charte graphique de l'Université Paris 8 (`main.css`)**
+Jeu de jetons rigoureusement identique à celui de validExpertises `0.3.4` : les
+deux feuilles partagent ce bloc et doivent rester synchronisées. Les noms sont
+conservés, seules les valeurs changent, aucune règle de mise en page n'est
+touchée.
+
+Le vert `#1B6B45` et l'ambre `#92400E` étaient déjà écrits en dur dans cette
+feuille ; les voici promus en jetons et partagés avec l'autre application.
+
+Comme pour validExpertises, quatre des cinq couleurs portant du texte blanc
+étaient sous le seuil AA et ne le sont plus.
+
+### Ajouté
+
+**Paramètre de version sur la feuille de style (`index.html`)**
+`assets/main.css` était appelée sans version, et le `.htaccess` ne désactive le
+cache que pour `index.html`. Les opérateurs auraient donc reçu le nouveau HTML
+avec l'ancienne feuille — défaut identique à celui corrigé dans validExpertises
+le 30 septembre, resté sans effet ici tant que la feuille n'avait pas changé.
+Elle change aujourd'hui. À incrémenter désormais à chaque release qui la touche.
+
+### Corrigé
+
+**Halo bleu sur un bouton devenu rouge (`main.css`)**
+Le bouton de lettre actif portait une ombre portée reprenant l'ancien bleu
+`#3498db`, écrite en `rgba`. Elle suit maintenant le jeton d'interaction.
+
+**Deux variables qui n'ont jamais existé (`main.css`)**
+`--color-background-secondary` et `--color-border-tertiary`, employées dans la
+liste des ECs de la fenêtre de suppression, ne sont déclarées nulle part : ces
+règles tombaient toujours sur leur valeur de repli, deux gris restés hors du
+système. Rattachées aux jetons réels.
+
+## [0.1.8] — 2026-10-20
+
+### Ajouté
+
+**ValoVizu dans le menu des outils (`index.html`)**
+Le tableau de bord ValoVizu rejoint le menu de navigation, qui présente
+désormais les trois outils de la suite. Le lien est relatif (`../valoVizu/`) et
+suppose les trois applications voisines sur le serveur, comme le lien existant
+vers `validExpertises`.
+
+Aucun masquage conditionnel ici : cleanKeywords n'a pas de session par lien, et
+l'application est déjà inutilisable sans clés d'API — elle ouvre la fenêtre de
+configuration et s'arrête là.
+
 ## [0.1.7] — 2026-06-12
- 
+
 ### Améliorations
- 
+
 **Migration des requêtes réseau vers fetch async (`omk.js`, `index.html`)**
 Même migration que `validExpertises` v0.2.8 — `searchItems`, `getAllItems`, `searchItemsPaginated` et `getItem` passent en `fetch` asynchrone. L'UI reste réactive pendant les requêtes. Fonctions concernées : `loadBrowse`, `showDeleteConfirm`, `setupBrowseMergeAc`, `loadConceptInfo`, `setupStickyAc`, ainsi que tous les call sites dans `refreshScope`, `scanLetter`, `previewCluster`, `executeFusion`, `renameConceptInPlace`.
- 
+
 **Protection anti-race-condition sur `setupStickyAc` (`index.html`)**
 Token `reqId` incrémenté à chaque frappe. Les réponses périmées sont ignorées. Spinner discret dans le dropdown pendant le chargement.
- 
+
 **Sauvegarde des settings protégée (`index.html`)**
 `localStorage.setItem(STORAGE_KEY)` est maintenant dans un `try/catch`. En cas d'indisponibilité du `localStorage` (navigation privée, quota dépassé), un toast avertit l'utilisateur au lieu d'un échec silencieux.
- 
+
 **Protection CORS explicite (`omk.js`)**
 `asyncRequest` détecte les erreurs réseau/CORS (`TypeError: Failed to fetch`) et lance une erreur avec un message explicite plutôt qu'un échec silencieux.
- 
+
 ### Correctifs
- 
+
 **Déduplication des concepts lors d'une fusion (`index.html`)**
 Quand deux concepts fusionnés référencent le même EC, cet EC se retrouvait avec le concept en double dans ses propriétés. Désormais si le concept cible est déjà présent sur un EC, la source est simplement retirée sans ajout de doublon.
 
