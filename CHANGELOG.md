@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.2.1] — 2026-10-22
+
+### Modifié
+
+**Menu des outils harmonisé entre les trois applications (`index.html`, `main.css`)**
+Le survol passe du gris au rose pâle de la charte, l'entrée courante gardant un
+gris neutre. Les deux fonds étaient jusqu'ici presque identiques — `#f3f4f6`
+contre `#EFE8EB` — et ne se distinguaient que parce que rien ne prend la mise au
+point à l'ouverture ; ce n'est pas le cas dans ValoVizu, où la confusion s'était
+effectivement produite. Les derniers gris écrits en dur du menu — en-tête,
+pastille, ligne de version, filet — passent aux jetons.
+
+### Ajouté
+
+**Entrée « Omeka S » dans le menu (`index.html`, `main.css`)**
+L'instance figure désormais au bas du menu, détachée par un filet : elle n'est
+pas un outil de la suite, elle est ce que la suite interroge. Son adresse est
+déduite de celle de l'API plutôt qu'écrite dans le balisage, car elle change
+d'un déploiement à l'autre. Elle part dans un nouvel onglet, là où les outils
+voisins remplacent la page — on va y vérifier une fiche, pas quitter l'outil.
+Même comportement et même présentation que dans ValoVizu.
+Aucun masquage conditionnel : cette application n'a pas de session par lien et
+reste réservée aux opérateurs.
+
+### Corrigé
+
+**Titre recouvert par le bouton des outils sous 760 px (`main.css`)**
+La règle responsive réécrivait le rembourrage en raccourci, ce qui annulait le
+`padding-left` réservant la place du bouton. Le titre repassait dessous. Le
+bouton étant hors du flux, il ne pousse rien : aucun test de débordement ne
+pouvait voir ce recouvrement, il a fallu le regarder.
+
+
 ## [0.2.0] — 2026-10-20
 
 ### Modifié

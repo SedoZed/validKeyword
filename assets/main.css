@@ -159,7 +159,10 @@ header h1     { font-size: 25px; font-weight: 600; line-height: 1.15; letter-spa
    on rend au titre sa taille d'origine. La signature s'efface en dernier :
    c'est l'élément le plus sacrifiable d'un en-tête à l'étroit. */
 @media (max-width: 760px) {
-    header        { flex-wrap: wrap; padding: .75rem 1rem; row-gap: .5rem; }
+    /* `padding-left` est redonné après le raccourci : sans lui, le titre
+       repassait sous le bouton des outils, qui est hors du flux et ne pousse
+       donc rien. Un test de débordement ne voit pas ce recouvrement. */
+    header        { flex-wrap: wrap; padding: .75rem 1rem; padding-left: 86px; row-gap: .5rem; }
     header h1     { font-size: 1.15rem; }
     .surtitre     { font-size: 10px; letter-spacing: .1em; }
     .header-right { flex-wrap: wrap; }
@@ -177,25 +180,40 @@ header h1     { font-size: 25px; font-weight: 600; line-height: 1.15; letter-spa
 .app-dropdown--open { display: block; }
 .app-dropdown-header {
     font-size: .7rem; text-transform: uppercase;
-    letter-spacing: .06em; color: #888;
+    letter-spacing: .06em; color: var(--neutral);
     padding: .55rem .85rem .3rem;
 }
 .app-dropdown-item {
     display: flex; align-items: center; gap: .6rem;
-    padding: .5rem .85rem; font-size: .85rem; color: #1a1a1a;
+    padding: .5rem .85rem; font-size: .85rem; color: var(--text);
     text-decoration: none; cursor: pointer; transition: background .12s;
 }
-.app-dropdown-item:hover { background: #f3f4f6; }
+/* Le survol passe du gris au rose pâle de la charte. L'entrée courante garde
+   un gris neutre : les deux fonds étaient jusqu'ici presque identiques —
+   #f3f4f6 contre #EFE8EB — et ne se distinguaient que parce que rien ne
+   prend la mise au point à l'ouverture. Ce n'est pas le cas dans ValoVizu,
+   où la confusion s'était effectivement produite. */
+.app-dropdown-item:hover,
+.app-dropdown-item:focus-visible { background: var(--signal-2); color: var(--accent); outline: none; }
+
+/* Filet détachant l'instance Omeka S : elle n'est pas un outil de la suite,
+   elle est ce que la suite interroge. */
+.app-dropdown-sep { height: 1px; background: var(--filet-doux); margin: .25rem 0; }
+.app-dropdown-note {
+    margin-left: auto; flex: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .66rem; color: var(--neutral);
+}
 /* Mêmes valeurs que dans validExpertises : le menu est l'élément que les trois
    outils ont en commun, il ne doit pas se présenter différemment de l'un à
    l'autre. Le vert tenait de l'ancienne identité de cette application seule. */
 .app-dropdown-item--active { background: var(--filet-doux); color: var(--text); font-weight: 500; pointer-events: none; }
-.app-dropdown-dot { width: 7px; height: 7px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+.app-dropdown-dot { width: 7px; height: 7px; border-radius: 50%; background: color-mix(in srgb, var(--text) 22%, transparent); flex-shrink: 0; }
 .app-dropdown-item--active .app-dropdown-dot { background: var(--accent); }
 .app-dropdown-version {
-    font-size: .7rem; color: #bbb;
+    font-size: .7rem; color: var(--neutral);
     padding: .3rem .85rem .5rem;
-    border-top: 0.5px solid #f0f0f0; margin-top: .2rem;
+    border-top: 1px solid var(--filet-doux); margin-top: .2rem;
 }
 
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>cleanKeywords — Nettoyage des mots-clefs</title>
     <script src="assets/js/d3.min.js"></script>
-    <link rel="stylesheet" href="assets/main.css?v=0.2.0" />
+    <link rel="stylesheet" href="assets/main.css?v=0.2.1" />
 </head>
 <body>
 
@@ -33,7 +33,7 @@
             <a class="app-dropdown-item" href="../valoVizu/index.html">
                 <span class="app-dropdown-dot"></span>📊 ValoVizu
             </a>
-            <div class="app-dropdown-version">v0.2.0</div>
+            <div class="app-dropdown-version">v0.2.1</div>
         </div>
     </div>
     <div class="header-title">
@@ -513,6 +513,35 @@ appSwitcher.addEventListener('click', e => {
     appDropdown.classList.toggle('app-dropdown--open');
 });
 document.addEventListener('click', () => appDropdown.classList.remove('app-dropdown--open'));
+
+// Entrée « Omeka S » du menu, identique dans les trois outils de la suite.
+// Son adresse est déduite de celle de l'API plutôt qu'écrite dans le balisage :
+// elle change d'un déploiement à l'autre. Elle part dans un nouvel onglet — on
+// y va vérifier une fiche, pas quitter l'outil — et un filet la détache des
+// trois applications, car elle n'est pas l'une d'elles mais ce qu'elles
+// interrogent toutes. Aucun masquage ici : cette application n'a pas de
+// session par lien, elle est déjà réservée aux opérateurs.
+(function ajouterLienOmeka() {
+    const racine = (pa.apiOmk || '').replace(/\/+$/, '').replace(/\/api$/, '');
+    const ligneVersion = appDropdown.querySelector('.app-dropdown-version');
+    if (!racine || !ligneVersion) return;
+
+    const filet = document.createElement('div');
+    filet.className = 'app-dropdown-sep';
+
+    const lien = document.createElement('a');
+    lien.className = 'app-dropdown-item';
+    lien.href   = racine;
+    lien.target = '_blank';
+    lien.rel    = 'noopener';
+    lien.title  = racine;
+    lien.innerHTML = '<span class="app-dropdown-dot"></span>🗄️ Omeka S'
+                   + '<span class="app-dropdown-note">instance</span>';
+
+    appDropdown.insertBefore(filet, ligneVersion);
+    appDropdown.insertBefore(lien,  ligneVersion);
+})();
+
 document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
 document.getElementById('btnClearOmkCache').addEventListener('click', () => {
     a?.omk?.clearMetadataCache();
